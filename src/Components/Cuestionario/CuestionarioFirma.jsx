@@ -13,12 +13,12 @@ const dataURLtoBlob = (dataurl) => {
 export default function CuestionarioFirma({ onNext, isProcessing }) {
   const sigCanvas = useRef({});
   const [error, setError] = useState(null);
-  const [fijado, setFijado] = useState(false); // <--- NUEVO ESTADO
+  const [fijado, setFijado] = useState(false);
 
   const limpiar = () => {
     sigCanvas.current.clear();
     setError(null);
-    setFijado(false); // <--- RESETEAR SI LIMPIAN
+    setFijado(false);
   };
 
   const guardar = () => {
@@ -33,7 +33,7 @@ export default function CuestionarioFirma({ onNext, isProcessing }) {
           blob: imagenBlob
         });
         
-        setFijado(true); // <--- ACTIVAR EL TICK VERDE
+        setFijado(true);
         console.log("Firma fijada correctamente");
     } else {
         setError("Por favor, firma antes de continuar.");
@@ -46,7 +46,15 @@ export default function CuestionarioFirma({ onNext, isProcessing }) {
         Firme dentro del recuadro
       </p>
       
-      <div className="canvas-wrapper">
+      {/* AJUSTE 1: Aplicamos pointer-events y opacidad dinámica */}
+      <div 
+        className="canvas-wrapper" 
+        style={{ 
+          pointerEvents: fijado ? 'none' : 'auto', 
+          opacity: fijado ? 0.7 : 1,
+          transition: 'all 0.3s ease'
+        }}
+      >
         <SignatureCanvas 
           ref={sigCanvas}
           canvasProps={{ 
@@ -56,11 +64,10 @@ export default function CuestionarioFirma({ onNext, isProcessing }) {
           }}
           backgroundColor="#ffffff"
           penColor="#004d40"
-          onBegin={() => setFijado(false)} // <--- SI VUELVE A TOCAR, SE QUITA EL TICK
+          // AJUSTE 2: Quitamos onBegin para que no se desbloquee solo al tocar
         />
       </div>
       
-      {/* MENSAJE DE ÉXITO (EL TICK) */}
       {fijado && !error && (
         <div className="mensaje-exito-firma">
            <span className="tick-verde">✔</span> Firma fijada correctamente
@@ -73,18 +80,18 @@ export default function CuestionarioFirma({ onNext, isProcessing }) {
 
       <div className="botones-firma">
         <button 
-          type="button" // <--- PARA EVITAR RECARGAS
+          type="button" 
           className="btn-limpiar" 
           onClick={limpiar} 
           disabled={isProcessing}
         >
-          Limpiar
+          {fijado ? "Cambiar firma" : "Limpiar"}
         </button>
         <button 
           type="button"
-          className={`btn-guardar ${fijado ? 'fijado' : ''}`} // <--- CLASE OPCIONAL
+          className={`btn-guardar ${fijado ? 'fijado' : ''}`}
           onClick={guardar} 
-          disabled={isProcessing}
+          disabled={isProcessing || fijado} // AJUSTE 3: Deshabilitar si ya está fijado
         >
           {isProcessing ? "Procesando..." : fijado ? "Firma Guardada" : "Fijar Firma"}
         </button>
