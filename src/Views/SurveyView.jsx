@@ -297,10 +297,14 @@ const finalizarEncuesta = async () => {
       await enviarFormulario(listaParaCorreo);
       console.log("Correo enviado al supervisor.");
     } else {
-      console.log("Modo operario: Guardado en DB finalizado, sin correo.");
+      console.log("Modo operario/limpieza: Guardado en DB finalizado, sin correo.");
     }
     
-    navigate("/gracias");
+    let tipoParaGracias = 'vendedor';
+    if (esOperario) tipoParaGracias = 'operario';
+    if (esLimpieza) tipoParaGracias = 'limpieza';
+
+    navigate("/gracias", { state: { tipo: tipoParaGracias } });
 
   } catch (error) {
     console.error("Error crítico:", error);
