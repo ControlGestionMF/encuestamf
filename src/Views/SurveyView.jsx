@@ -158,19 +158,33 @@ export default function SurveyView() {
 
 const finalizarEncuesta = async () => {
   // 1. VALIDACIÓN (Obligatoriedad)
+  let idPersonalSeleccionado = null;
+  let patenteSeleccionada = null;
+
   for (const p of preguntas) {
     const valor = respuestasValues[p.idpregunta];
-    const esOpcional = p.descripcion?.toLowerCase().includes("transporte");
+    const desc = p.descripcion?.toLowerCase() || "";
+
+    if (desc.includes("chofer") || desc.includes("conductor")) idPersonalSeleccionado = valor;
+    if (desc.includes("patente")) patenteSeleccionada = valor;
+
+    const esOpcional = desc.includes("transporte");
     if (!esOpcional && (valor === null || valor === undefined || valor === "")) {
       alert(`La pregunta "${p.descripcion}" es obligatoria.`);
       return;
     }
   }
+  
+  // --- 2. CONTROL ANTI-FANTASMAS ---
+  const esOperario = idEncuesta?.toLowerCase().includes("operario");
+  if (esOperario && (!idPersonalSeleccionado || !patenteSeleccionada)) {
+    alert("Error crítico: No se ha detectado el Chofer o la Patente. Verifique los campos.");
+    return;
+  }
 
   try {
     setIsProcessing(true);
     const listaParaCorreo = [];
-    const esOperario = idEncuesta?.toLowerCase().includes("operario");
     const esLimpieza = idEncuesta?.toLowerCase().includes("limpieza");
 
     // --- 1. DETERMINAR LA TABLA DESTINO (MODIFICADO) ---
