@@ -18,10 +18,11 @@ import CuestionarioMultiple from "../Components/Cuestionario/CuestionarioMultipl
 import CuestionarioFirma from "../Components/Cuestionario/CuestionarioFirma";
 
 // orden personalizado de preguntas
+// 
 const MAPA_ORDEN = {
   15: 1, 32: 2, 18: 3, 19: 4, 16: 5, 17: 6, 20: 7, 21: 8, 23: 9, 24: 10, 33: 11, 25: 12, 
-  34: 13, 26: 14, 35: 15, 29: 16, 36: 17, 37: 18, 38: 19, 28: 20, 27: 21, 39: 22, 52: 23,
-  53: 24
+  34: 13, 26: 14, 35: 15, 29: 16, 36: 17, 37: 18, 38: 19, 28: 20, 27: 21, 54: 22, 39: 23,
+  52: 24, 53: 25
 };
 
 export default function SurveyView() {
