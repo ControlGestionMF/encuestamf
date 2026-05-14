@@ -18,7 +18,7 @@ import CuestionarioMultiple from "../Components/Cuestionario/CuestionarioMultipl
 import CuestionarioFirma from "../Components/Cuestionario/CuestionarioFirma";
 
 // orden personalizado de preguntas
-// 
+// Operarios
 const MAPA_ORDEN = {
   15: 1, 32: 2, 18: 3, 19: 4, 16: 5, 17: 6, 20: 7, 21: 8, 23: 9, 24: 10, 33: 11, 25: 12, 
   34: 13, 26: 14, 35: 15, 29: 16, 36: 17, 37: 18, 38: 19, 28: 20, 27: 21, 54: 22, 39: 23,
@@ -87,8 +87,13 @@ export default function SurveyView() {
       console.log("3. Preguntas después de filtrar:", filtradas);
 
       const ordenadas = filtradas.sort((a, b) => {
-        const ordenA = MAPA_ORDEN[a.idpregunta] || 99;
-        const ordenB = MAPA_ORDEN[b.idpregunta] || 99;
+        // Forzamos a que el ID sea tratado como número para buscarlo en el mapa
+        const idA = Number(a.idpregunta);
+        const idB = Number(b.idpregunta);
+
+        const ordenA = MAPA_ORDEN[idA] || 99;
+        const ordenB = MAPA_ORDEN[idB] || 99;
+
         return ordenA - ordenB;
       });
 
