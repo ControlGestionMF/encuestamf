@@ -518,6 +518,8 @@ const badgeLabel = (idLow.includes("operario") || idLow.includes("limpieza"))
                         onNext={(val) => handleCambioRespuesta(p.idpregunta, val)}
                         currentValue={respuestasValues[p.idpregunta]}
                         placeholder={p.descripcion}
+                        // SI EL ID ES 54, SE VOLVERÁ UN TEXTAREA AUTOMÁTICAMENTE
+                        multiline={p.idpregunta === 54 || p.descripcion.toLowerCase().includes("comentario")}
                       />
                     )}
                   </>

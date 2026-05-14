@@ -53,7 +53,8 @@ export default function CuestionarioTexto({
   placeholder = "",
   tipoValidacion = "texto",
   disabled,
-  currentValue = ""
+  currentValue = "",
+  multiline = false
 }) {
   const [valor, setValor] = useState(currentValue);
   const [error, setError] = useState(false);
@@ -101,14 +102,26 @@ export default function CuestionarioTexto({
 
   return (
     <div className="input-container">
-      <input
-        type={tipoValidacion === "email" ? "email" : "text"}
-        className={`input-texto-moderno ${error ? "input-error" : ""}`}
-        value={valor}
-        onChange={handleChange}
-        placeholder={placeholder}
-        disabled={disabled}
-      />
+      {multiline ? (
+        <textarea
+          className={`input-texto-moderno ${error ? "input-error" : ""}`}
+          value={valor}
+          onChange={handleChange}
+          placeholder={placeholder}
+          disabled={disabled}
+          rows="4"
+          style={{ minHeight: '120px', resize: 'vertical' }}
+        />
+      ) : (
+        <input
+          type={tipoValidacion === "email" ? "email" : "text"}
+          className={`input-texto-moderno ${error ? "input-error" : ""}`}
+          value={valor}
+          onChange={handleChange}
+          placeholder={placeholder}
+          disabled={disabled}
+        />
+      )}
       {error && (
         <span className="error-mensaje" style={{ color: 'red', fontSize: '0.8rem' }}>
           {getMensajeError()}
