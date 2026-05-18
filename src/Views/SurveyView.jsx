@@ -17,12 +17,18 @@ import CuestionarioTexto from "../Components/Cuestionario/CuestionarioTexto";
 import CuestionarioMultiple from "../Components/Cuestionario/CuestionarioMultiple";
 import CuestionarioFirma from "../Components/Cuestionario/CuestionarioFirma";
 
-// orden personalizado de preguntas
-// Operarios
-const MAPA_ORDEN = {
-  15: 1, 32: 2, 18: 3, 19: 4, 16: 5, 17: 6, 20: 7, 21: 8, 23: 9, 24: 10, 33: 11, 25: 12, 
-  34: 13, 26: 14, 35: 15, 29: 16, 36: 17, 37: 18, 38: 19, 28: 20, 27: 21, 54: 22, 39: 23,
-  52: 24, 53: 25
+const CONFIG_ENCUESTAS = {
+  operario: {
+    orden: { 15: 1, 32: 2, 18: 3, 19: 4, 16: 5, 17: 6, 20: 7, 21: 8, 23: 9, 24: 10, 33: 11,
+      25: 12, 34: 13, 26: 14, 35: 15, 29: 16, 36: 17, 37: 18, 38: 19, 28: 20, 27: 21, 54: 22,
+      39: 23, 52: 24, 53: 25},
+    opcionales: []
+  },
+  limpieza:{
+    orden: {39: 1, 52: 2, 53: 3, 40: 4, 41: 5, 42: 6, 43: 7, 44: 8, 45: 9, 46: 10, 47: 11, 48: 12, 49: 13,
+      50:14, 51: 15},
+    opcionales: [39, 52, 53]
+  }
 };
 
 export default function SurveyView() {
@@ -48,6 +54,7 @@ export default function SurveyView() {
   // 1. Recuperamos los datos del vendedor desde el sessionStorage
   const nombreVendedor = sessionStorage.getItem("nombreencuestado");
   const idSupervisor = sessionStorage.getItem("id_supervisor");
+  const tipoActual = idEncuesta?.toLowerCase().includes("limpieza") ? "limpieza" : "operario";
 
   useEffect(() => {
   if (!idUsuario) { navigate("/"); return; }
@@ -86,14 +93,12 @@ export default function SurveyView() {
 
       console.log("3. Preguntas después de filtrar:", filtradas);
 
+      const tipoActual = idEncuesta?.toLowerCase().includes("limpieza") ? "limpieza" : "operario";
+      const mapaOrdenActual = CONFIG_ENCUESTAS[tipoActual]?.orden || {};
+
       const ordenadas = filtradas.sort((a, b) => {
-        // Forzamos a que el ID sea tratado como número para buscarlo en el mapa
-        const idA = Number(a.idpregunta);
-        const idB = Number(b.idpregunta);
-
-        const ordenA = MAPA_ORDEN[idA] || 99;
-        const ordenB = MAPA_ORDEN[idB] || 99;
-
+        const ordenA = mapaOrdenActual[Number(a.idpregunta)] || 99;
+        const ordenB = mapaOrdenActual[Number(b.idpregunta)] || 99;
         return ordenA - ordenB;
       });
 
@@ -115,7 +120,7 @@ export default function SurveyView() {
     }
   }
   cargarDatosIniciales();
-}, [idEncuesta, idUsuario, navigate]);
+}, [idEncuesta, idUsuario, navigate, tipoActual]);
 
   const handleCambioRespuesta = (idPregunta, valor) => {
     setRespuestasValues(prev => ({ ...prev, [idPregunta]: valor }));
@@ -167,18 +172,26 @@ const finalizarEncuesta = async () => {
   let idPersonalSeleccionado = null;
   let patenteSeleccionada = null;
 
+  const configActual = CONFIG_ENCUESTAS[tipoActual];
+
   for (const p of preguntas) {
     const valor = respuestasValues[p.idpregunta];
     const desc = p.descripcion?.toLowerCase() || "";
+    const idPreg = Number(p.idpregunta);
 
-    if (desc.includes("chofer") || desc.includes("conductor")) idPersonalSeleccionado = valor;
-    if (desc.includes("patente")) patenteSeleccionada = valor;
+    // NUEVA LÓGICA DE OBLIGATORIEDAD
+    const esOpcionalPorPalabra = desc.includes("transporte");
+    const esOpcionalPorConfig = configActual?.opcionales?.includes(idPreg);
+    
+    const esRealmenteOpcional = esOpcionalPorPalabra || esOpcionalPorConfig;
 
-    const esOpcional = desc.includes("transporte");
-    if (!esOpcional && (valor === null || valor === undefined || valor === "")) {
+    if (!esRealmenteOpcional && (valor === null || valor === undefined || valor === "")) {
       alert(`La pregunta "${p.descripcion}" es obligatoria.`);
       return;
     }
+
+    if (desc.includes("chofer") || desc.includes("conductor")) idPersonalSeleccionado = valor;
+    if (desc.includes("patente")) patenteSeleccionada = valor;
   }
   
   // --- 2. CONTROL ANTI-FANTASMAS ---
@@ -361,7 +374,8 @@ const badgeLabel = (idLow.includes("operario") || idLow.includes("limpieza"))
         {preguntas.map((p, index) => {
           const esOperario = idEncuesta?.toLowerCase().includes("operario");
           // Usamos la constante que sacamos fuera
-          const numeroOrden = MAPA_ORDEN[p.idpregunta];
+          const mapaOrdenActual = CONFIG_ENCUESTAS[tipoActual]?.orden || {};
+          const numeroOrden = mapaOrdenActual[p.idpregunta];
 
           return (
             <div key={p.idpregunta}>
