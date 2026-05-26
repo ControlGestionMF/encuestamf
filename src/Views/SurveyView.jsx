@@ -177,10 +177,9 @@ export default function SurveyView() {
     const respuestasActuales = { ...respuestasValues };
 
     for (const p of preguntas) {
-      // Aseguramos que el ID de la pregunta sea tratado siempre como número para las configs
       const idPreg = Number(p.idpregunta);
       const valor = respuestasActuales[p.idpregunta];
-      const desc = p.descripcion?.toLowerCase() || "";
+      const desc = p.descripcion?.toLowerCase().trim() || "";
 
       // Capturamos Chofer y Patente para controles posteriores
       if (desc.includes("chofer") || desc.includes("conductor")) idPersonalSeleccionado = valor;
@@ -190,12 +189,12 @@ export default function SurveyView() {
       const esOpcionalPorPalabra = desc.includes("transporte");
       const esOpcionalPorConfig = configActual?.opcionales?.map(Number).includes(idPreg);
       
-      // NUEVO: Si la pregunta menciona "auxiliar", la hacemos opcional por defecto para terreno
-      const esPreguntaAuxiliar = desc.includes("auxiliar");
+      // BLINDAJE: Si el id es 54 O el texto incluye "auxiliar", es opcional
+      const esPreguntaAuxiliar = idPreg === 54 || desc.includes("auxiliar") || desc.includes("auxilíar");
 
       const esRealmenteOpcional = esOpcionalPorPalabra || esOpcionalPorConfig || esPreguntaAuxiliar;
 
-      // Si NO es opcional y está vacío, frenamos el envío
+      // Si NO es opcional y está vacío, frenamos el envío ANTES de guardar nada
       if (!esRealmenteOpcional && (valor === null || valor === undefined || String(valor).trim() === "")) {
         alert(`La pregunta "${p.descripcion}" es obligatoria.`);
         return;
