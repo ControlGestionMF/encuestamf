@@ -181,23 +181,24 @@ export default function SurveyView() {
       const valor = respuestasActuales[p.idpregunta];
       const desc = p.descripcion?.toLowerCase().trim() || "";
 
-      // Capturamos Chofer y Patente para controles posteriores
       if (desc.includes("chofer") || desc.includes("conductor")) idPersonalSeleccionado = valor;
       if (desc.includes("patente")) patenteSeleccionada = valor;
 
-      // --- LÓGICA DE EXCEPCIONES PARA OBLIGATORIEDAD ---
       const esOpcionalPorPalabra = desc.includes("transporte");
       const esOpcionalPorConfig = configActual?.opcionales?.map(Number).includes(idPreg);
       
-      // BLINDAJE: Si el id es 54 O el texto incluye "auxiliar", es opcional
+      // BLINDAJE ULTRA REFORZADO
       const esPreguntaAuxiliar = idPreg === 54 || desc.includes("auxiliar") || desc.includes("auxilíar");
-
       const esRealmenteOpcional = esOpcionalPorPalabra || esOpcionalPorConfig || esPreguntaAuxiliar;
 
-      // Si NO es opcional y está vacío, frenamos el envío ANTES de guardar nada
+      // REVISIÓN EN VIVO PARA EL CELULAR
+      if (idPreg === 54) {
+        alert(`DATOS AUXILIAR EN CELULAR:\n- ID: ${idPreg}\n- Valor actual: "${valor}"\n- ¿Es opcional por código?: ${esRealmenteOpcional ? "SÍ" : "NO"}`);
+      }
+
       if (!esRealmenteOpcional && (valor === null || valor === undefined || String(valor).trim() === "")) {
         alert(`La pregunta "${p.descripcion}" es obligatoria.`);
-        return;
+        return; 
       }
     }
     
