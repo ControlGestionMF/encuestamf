@@ -167,185 +167,168 @@ export default function SurveyView() {
     }
   };
 
-const finalizarEncuesta = async () => {
-  // 1. VALIDACIÓN (Obligatoriedad)
-  let idPersonalSeleccionado = null;
-  let patenteSeleccionada = null;
+  const finalizarEncuesta = async () => {
+    let idPersonalSeleccionado = null;
+    let patenteSeleccionada = null;
 
-  const configActual = CONFIG_ENCUESTAS[tipoActual];
+    const configActual = CONFIG_ENCUESTAS[tipoActual];
 
-  for (const p of preguntas) {
-    const valor = respuestasValues[p.idpregunta];
-    const desc = p.descripcion?.toLowerCase() || "";
-    const idPreg = Number(p.idpregunta);
+    // Forzamos la lectura limpia de las respuestas para evitar desfases de estado en producción
+    const respuestasActuales = { ...respuestasValues };
 
-    // NUEVA LÓGICA DE OBLIGATORIEDAD
-    const esOpcionalPorPalabra = desc.includes("transporte");
-    const esOpcionalPorConfig = configActual?.opcionales?.includes(idPreg);
+    for (const p of preguntas) {
+      // Aseguramos que el ID de la pregunta sea tratado siempre como número para las configs
+      const idPreg = Number(p.idpregunta);
+      const valor = respuestasActuales[p.idpregunta];
+      const desc = p.descripcion?.toLowerCase() || "";
+
+      // Capturamos Chofer y Patente para controles posteriores
+      if (desc.includes("chofer") || desc.includes("conductor")) idPersonalSeleccionado = valor;
+      if (desc.includes("patente")) patenteSeleccionada = valor;
+
+      // --- LÓGICA DE EXCEPCIONES PARA OBLIGATORIEDAD ---
+      const esOpcionalPorPalabra = desc.includes("transporte");
+      const esOpcionalPorConfig = configActual?.opcionales?.map(Number).includes(idPreg);
+      
+      // NUEVO: Si la pregunta menciona "auxiliar", la hacemos opcional por defecto para terreno
+      const esPreguntaAuxiliar = desc.includes("auxiliar");
+
+      const esRealmenteOpcional = esOpcionalPorPalabra || esOpcionalPorConfig || esPreguntaAuxiliar;
+
+      // Si NO es opcional y está vacío, frenamos el envío
+      if (!esRealmenteOpcional && (valor === null || valor === undefined || String(valor).trim() === "")) {
+        alert(`La pregunta "${p.descripcion}" es obligatoria.`);
+        return;
+      }
+    }
     
-    const esRealmenteOpcional = esOpcionalPorPalabra || esOpcionalPorConfig;
-
-    if (!esRealmenteOpcional && (valor === null || valor === undefined || valor === "")) {
-      alert(`La pregunta "${p.descripcion}" es obligatoria.`);
+    // --- CONTROL DE SEGURIDAD (Solo para la encuesta de camión) ---
+    const esOperario = idEncuesta?.toLowerCase().includes("operario");
+    if (esOperario && (!idPersonalSeleccionado || String(idPersonalSeleccionado).trim() === "" || !patenteSeleccionada || String(patenteSeleccionada).trim() === "")) {
+      alert("Error crítico: No se ha detectado el Chofer o la Patente. Verifique los campos antes de enviar.");
       return;
     }
 
-    if (desc.includes("chofer") || desc.includes("conductor")) idPersonalSeleccionado = valor;
-    if (desc.includes("patente")) patenteSeleccionada = valor;
-  }
-  
-  // --- 2. CONTROL ANTI-FANTASMAS ---
-  const esOperario = idEncuesta?.toLowerCase().includes("operario");
-  if (esOperario && (!idPersonalSeleccionado || !patenteSeleccionada)) {
-    alert("Error crítico: No se ha detectado el Chofer o la Patente. Verifique los campos.");
-    return;
-  }
+    try {
+      setIsProcessing(true);
+      const listaParaCorreo = [];
+      const esLimpieza = idEncuesta?.toLowerCase().includes("limpieza");
 
-  try {
-    setIsProcessing(true);
-    const listaParaCorreo = [];
-    const esLimpieza = idEncuesta?.toLowerCase().includes("limpieza");
+      let tablaDestino = "respuestas_operario";
+      if (esLimpieza) tablaDestino = "respuestas_limpieza";
+      if (!esOperario && !esLimpieza) tablaDestino = "respuesta";
 
-    // --- 1. DETERMINAR LA TABLA DESTINO (MODIFICADO) ---
-    let tablaDestino = "respuestas_operario";
-    if (esLimpieza) tablaDestino = "respuestas_limpieza";
-    if (!esOperario && !esLimpieza) tablaDestino = "respuesta";
+      // Creamos la cabecera en la base de datos
+      const { data: cabecera, error: errCabecera } = await supabase
+        .from('formularios_hechos')
+        .insert([{
+          id_usuario: parseInt(idUsuario),
+          tipo_formulario: idEncuesta,
+          id_supervisor: parseInt(idSupervisor)
+        }])
+        .select()
+        .single();
 
-    // --- A. CREAR EL ENCABEZADO (CABECERA) ---
-    const { data: cabecera, error: errCabecera } = await supabase
-      .from('formularios_hechos')
-      .insert([{
-        id_usuario: parseInt(idUsuario),
-        tipo_formulario: idEncuesta,
-        id_supervisor: parseInt(idSupervisor)
-      }])
-      .select()
-      .single();
+      if (errCabecera) throw new Error("Error al crear cabecera: " + errCabecera.message);
+      const nuevoIdFormulario = cabecera.id_formulario;
 
-    if (errCabecera) throw new Error("Error al crear cabecera: " + errCabecera.message);
-    const nuevoIdFormulario = cabecera.id_formulario;
+      // Guardado de las respuestas en lote/bucle
+      for (const p of preguntas) {
+        const valor = respuestasActuales[p.idpregunta];
+        const tipo = p.tipopregunta ? p.tipopregunta.trim().toLowerCase() : "";
+        let urlFoto = null;
+        let textoCorreo = valor;
 
-    // --- B. BUCLE DE PREGUNTAS ---
-    for (const p of preguntas) {
-      const valor = respuestasValues[p.idpregunta];
-      const tipo = p.tipopregunta ? p.tipopregunta.trim().toLowerCase() : "";
-      let urlFoto = null;
-      let textoCorreo = valor;
-
-      // Template base del payload con el VÍNCULO MÁGICO
-      const basePayload = {
-        id_formulario_vinculado: nuevoIdFormulario,
-        idpregunta: p.idpregunta,
-        fotourl: null,
-        idopcion: null,
-        descripcion: null
-      };
-      
-      // --- LÓGICA DE ASIGNACIÓN Y GUARDADO ---
-      // 1. Fotos y Firmas
-      if ((tipo === "foto" || tipo === "firma") && valor) {
-        let archivoParaSubir = valor;
+        const basePayload = {
+          id_formulario_vinculado: nuevoIdFormulario,
+          idpregunta: p.idpregunta,
+          fotourl: null,
+          idopcion: null,
+          descripcion: null
+        };
         
-        if (valor.blob) {
-          archivoParaSubir = valor.blob;
-        }
+        // 1. Fotos y Firmas
+        if ((tipo === "foto" || tipo === "firma") && valor) {
+          let archivoParaSubir = valor.blob ? valor.blob : valor;
 
-        // Verificamos si es algo "subible" (Blob, File o Base64)
-        if (archivoParaSubir instanceof Blob || archivoParaSubir instanceof File || (typeof archivoParaSubir === 'string' && archivoParaSubir.includes(','))) {
-          try {
-            console.log(`Subiendo ${tipo} al Bucket...`);
-            urlFoto = await subirFoto(archivoParaSubir, nombreVendedor || "Usuario");
-          } catch (e) {
-            console.error("Error subiendo imagen:", e);
+          if (archivoParaSubir instanceof Blob || archivoParaSubir instanceof File || (typeof archivoParaSubir === 'string' && archivoParaSubir.includes(','))) {
+            try {
+              urlFoto = await subirFoto(archivoParaSubir, nombreVendedor || "Usuario");
+            } catch (e) {
+              console.error("Error subiendo imagen:", e);
+            }
+          } else {
+            urlFoto = typeof archivoParaSubir === 'string' && archivoParaSubir.startsWith('http') ? archivoParaSubir : null;
           }
-        } else {
-          // Si por alguna razón ya es una URL, la mantenemos
-          urlFoto = typeof archivoParaSubir === 'string' && archivoParaSubir.startsWith('http') ? archivoParaSubir : null;
-        }
-        
-        // IMPORTANTE: Guardamos en la DB con la URL obtenida
-        const payload = { ...basePayload, fotourl: urlFoto };
-        await insertarRespuesta(payload, tablaDestino);
-      }
-
-      // 2. Única (Radio Buttons)
-      else if (tipo === "unica") {
-        const comentarioExtra = observacionesExtra[p.idpregunta] || null;
-        const payload = {
-          ...basePayload,
-          idopcion: parseInt(valor) || null,
-          descripcion: comentarioExtra
-        };
-        await insertarRespuesta(payload, tablaDestino);
-        const opt = opcionesMap[p.idpregunta]?.find(o => String(o.idopcion) === String(valor));
-        textoCorreo = opt ? (comentarioExtra ? `${opt.descripcion} (Nota: ${comentarioExtra})` : opt.descripcion) : valor;
-      } 
-      
-      // 3. Múltiple (Checkboxes)
-      else if (tipo === "multiple" && valor) {
-        const ids = String(valor).split(",");
-        const nombresSeleccionados = [];
-        for (const idStr of ids) {
-          const idLimpio = idStr.trim();
-          const payloadMultiple = { ...basePayload, idopcion: parseInt(idLimpio) };
-          await insertarRespuesta(payloadMultiple, tablaDestino);
-          const opt = opcionesMap[p.idpregunta]?.find(o => String(o.idopcion) === idLimpio);
-          nombresSeleccionados.push(opt ? opt.descripcion : idLimpio);
-        }
-        textoCorreo = nombresSeleccionados.join(", ");
-      } 
-      
-      // 4. Texto Normal
-      else {
-        const esPreguntaChofer = p.descripcion.toLowerCase().includes("chofer") || p.descripcion.toLowerCase().includes("conductor");
-        const esPreguntaAuxiliar = p.descripcion.toLowerCase().includes("auxiliar");
-
-        const payload = { 
-          ...basePayload, 
-          descripcion: valor ? String(valor) : null 
-        };
-
-        // Si es chofer o auxiliar, el "valor" ahora será el ID (porque ajustaremos el <select> abajo)
-        if ((esPreguntaChofer || esPreguntaAuxiliar) && valor) {
-          payload.id_personal_respondido = parseInt(valor);
           
-          // Para el correo, buscamos el nombre real usando el ID
-          const persona = [...choferes, ...auxiliares].find(per => String(per.id_personal) === String(valor));
-          textoCorreo = persona ? persona.nombre_completo : valor;
+          await insertarRespuesta({ ...basePayload, fotourl: urlFoto }, tablaDestino);
         }
 
-        await insertarRespuesta(payload, tablaDestino);
+        // 2. Selección Única
+        else if (tipo === "unica") {
+          const comentarioExtra = observacionesExtra[p.idpregunta] || null;
+          await insertarRespuesta({
+            ...basePayload,
+            idopcion: parseInt(valor) || null,
+            descripcion: comentarioExtra
+          }, tablaDestino);
+          const opt = opcionesMap[p.idpregunta]?.find(o => String(o.idopcion) === String(valor));
+          textoCorreo = opt ? (comentarioExtra ? `${opt.descripcion} (Nota: ${comentarioExtra})` : opt.descripcion) : valor;
+        } 
+        
+        // 3. Selección Múltiple
+        else if (tipo === "multiple" && valor) {
+          const ids = String(valor).split(",");
+          const nombresSeleccionados = [];
+          for (const idStr of ids) {
+            const idLimpio = idStr.trim();
+            await insertarRespuesta({ ...basePayload, idopcion: parseInt(idLimpio) }, tablaDestino);
+            const opt = opcionesMap[p.idpregunta]?.find(o => String(o.idopcion) === idLimpio);
+            nombresSeleccionados.push(opt ? opt.descripcion : idLimpio);
+          }
+          textoCorreo = nombresSeleccionados.join(", ");
+        } 
+        
+        // 4. Texto / Selects Dinámicos
+        else {
+          const esPreguntaChofer = p.descripcion.toLowerCase().includes("chofer") || p.descripcion.toLowerCase().includes("conductor");
+          const esPreguntaAuxiliar = p.descripcion.toLowerCase().includes("auxiliar");
+
+          const payload = { ...basePayload, descripcion: valor ? String(valor) : null };
+
+          if ((esPreguntaChofer || esPreguntaAuxiliar) && valor) {
+            payload.id_personal_respondido = parseInt(valor);
+            const persona = [...choferes, ...auxiliares].find(per => String(per.id_personal) === String(valor));
+            textoCorreo = persona ? persona.nombre_completo : valor;
+          }
+
+          await insertarRespuesta(payload, tablaDestino);
+        }
+
+        listaParaCorreo.push({
+          pregunta: p.descripcion,
+          respuesta: urlFoto || textoCorreo,
+          fotourl: urlFoto
+        });
       }
 
-      // Llenamos la lista para el correo
-      listaParaCorreo.push({
-        pregunta: p.descripcion,
-        respuesta: urlFoto || textoCorreo,
-        fotourl: urlFoto
-      });
+      if (!esOperario && !esLimpieza) {
+        await enviarFormulario(listaParaCorreo);
+      }
+      
+      let tipoParaGracias = 'vendedor';
+      if (esOperario) tipoParaGracias = 'operario';
+      if (esLimpieza) tipoParaGracias = 'limpieza';
+
+      navigate("/gracias", { state: { tipo: tipoParaGracias } });
+
+    } catch (error) {
+      console.error("Error crítico al finalizar:", error);
+      alert("Hubo un problema al guardar la encuesta: " + error.message);
+    } finally {
+      setIsProcessing(false);
     }
-
-    // --- C. ENVÍO DE CORREO (SOLO VENDEDORES) ---
-    if (!esOperario && !esLimpieza) {
-      await enviarFormulario(listaParaCorreo);
-      console.log("Correo enviado al supervisor.");
-    } else {
-      console.log("Modo operario/limpieza: Guardado en DB finalizado, sin correo.");
-    }
-    
-    let tipoParaGracias = 'vendedor';
-    if (esOperario) tipoParaGracias = 'operario';
-    if (esLimpieza) tipoParaGracias = 'limpieza';
-
-    navigate("/gracias", { state: { tipo: tipoParaGracias } });
-
-  } catch (error) {
-    console.error("Error crítico:", error);
-    alert("Hubo un problema: " + error.message);
-  } finally {
-    setIsProcessing(false);
-  }
-};
+  };
 
 const idLow = String(idEncuesta).toLowerCase();
 const tituloDinamico = idLow.includes("operario") 
