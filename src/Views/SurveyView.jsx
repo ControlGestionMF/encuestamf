@@ -168,57 +168,81 @@ export default function SurveyView() {
   };
 
   const finalizarEncuesta = async () => {
+    const configActual = CONFIG_ENCUESTAS[tipoActual];
+    const respuestasActuales = { ...respuestasValues };
+    const esOperario = idEncuesta?.toLowerCase().includes("operario");
+    const esLimpieza = idEncuesta?.toLowerCase().includes("limpieza");
+
     let idPersonalSeleccionado = null;
     let patenteSeleccionada = null;
 
-    const configActual = CONFIG_ENCUESTAS[tipoActual];
-
-    // Forzamos la lectura limpia de las respuestas para evitar desfases de estado en producción
-    const respuestasActuales = { ...respuestasValues };
-
+    // ==========================================
+    // PASO 1: VALIDACIÓN DE OBLIGATORIEDAD
+    // ==========================================
     for (const p of preguntas) {
       const idPreg = Number(p.idpregunta);
       const valor = respuestasActuales[p.idpregunta];
       const desc = p.descripcion?.toLowerCase().trim() || "";
 
-      if (desc.includes("chofer") || desc.includes("conductor")) idPersonalSeleccionado = valor;
-      if (desc.includes("patente")) patenteSeleccionada = valor;
+      // Capturar datos críticos solo si es encuesta de operario
+      if (esOperario) {
+        if (desc.includes("chofer") || desc.includes("conductor")) idPersonalSeleccionado = valor;
+        if (desc.includes("patente")) patenteSeleccionada = valor;
+      }
 
+      // --- LÓGICA DE EXCEPCIONES ---
       const esOpcionalPorPalabra = desc.includes("transporte");
       const esOpcionalPorConfig = configActual?.opcionales?.map(Number).includes(idPreg);
       
-      // BLINDAJE ULTRA REFORZADO
+      // Si el id es 54 O contiene "auxiliar", es opcional por defecto
       const esPreguntaAuxiliar = idPreg === 54 || desc.includes("auxiliar") || desc.includes("auxilíar");
+      
       const esRealmenteOpcional = esOpcionalPorPalabra || esOpcionalPorConfig || esPreguntaAuxiliar;
 
-      // REVISIÓN EN VIVO PARA EL CELULAR
-      if (idPreg === 54) {
-        alert(`DATOS AUXILIAR EN CELULAR:\n- ID: ${idPreg}\n- Valor actual: "${valor}"\n- ¿Es opcional por código?: ${esRealmenteOpcional ? "SÍ" : "NO"}`);
-      }
-
+      // Si NO es opcional y está vacío, frenamos el envío inmediatamente
       if (!esRealmenteOpcional && (valor === null || valor === undefined || String(valor).trim() === "")) {
         alert(`La pregunta "${p.descripcion}" es obligatoria.`);
         return; 
       }
     }
     
-    // --- CONTROL DE SEGURIDAD (Solo para la encuesta de camión) ---
-    const esOperario = idEncuesta?.toLowerCase().includes("operario");
-    if (esOperario && (!idPersonalSeleccionado || String(idPersonalSeleccionado).trim() === "" || !patenteSeleccionada || String(patenteSeleccionada).trim() === "")) {
-      alert("Error crítico: No se ha detectado el Chofer o la Patente. Verifique los campos antes de enviar.");
-      return;
+    // --- CONTROL DE SEGURIDAD EXCLUSIVO PARA OPERARIO ---
+    if (esOperario) {
+      // Rescate por si el estado venía con desfase en el render móvil
+      if (!idPersonalSeleccionado || !patenteSeleccionada) {
+        for (const p of preguntas) {
+          const desc = p.descripcion?.toLowerCase().trim() || "";
+          if ((desc.includes("chofer") || desc.includes("conductor")) && respuestasActuales[p.idpregunta]) {
+            idPersonalSeleccionado = respuestasActuales[p.idpregunta];
+          }
+          if (desc.includes("patente") && respuestasActuales[p.idpregunta]) {
+            patenteSeleccionada = respuestasActuales[p.idpregunta];
+          }
+        }
+      }
+
+      if (!idPersonalSeleccionado || String(idPersonalSeleccionado).trim() === "") {
+        alert("Atención: No se ha detectado la selección del Chofer. Por favor, selecciónelo nuevamente.");
+        return;
+      }
+      if (!patenteSeleccionada || String(patenteSeleccionada).trim() === "") {
+        alert("Atención: No se ha detectado la Patente del vehículo. Por favor, verifique el campo.");
+        return;
+      }
     }
 
+    // ==========================================
+    // PASO 2: GUARDADO EN LA BASE DE DATOS
+    // ==========================================
     try {
       setIsProcessing(true);
       const listaParaCorreo = [];
-      const esLimpieza = idEncuesta?.toLowerCase().includes("limpieza");
 
       let tablaDestino = "respuestas_operario";
       if (esLimpieza) tablaDestino = "respuestas_limpieza";
       if (!esOperario && !esLimpieza) tablaDestino = "respuesta";
 
-      // Creamos la cabecera en la base de datos
+      // Crear la cabecera del formulario
       const { data: cabecera, error: errCabecera } = await supabase
         .from('formularios_hechos')
         .insert([{
@@ -232,7 +256,7 @@ export default function SurveyView() {
       if (errCabecera) throw new Error("Error al crear cabecera: " + errCabecera.message);
       const nuevoIdFormulario = cabecera.id_formulario;
 
-      // Guardado de las respuestas en lote/bucle
+      // Procesar e insertar las respuestas válidas
       for (const p of preguntas) {
         const valor = respuestasActuales[p.idpregunta];
         const tipo = p.tipopregunta ? p.tipopregunta.trim().toLowerCase() : "";
@@ -250,7 +274,6 @@ export default function SurveyView() {
         // 1. Fotos y Firmas
         if ((tipo === "foto" || tipo === "firma") && valor) {
           let archivoParaSubir = valor.blob ? valor.blob : valor;
-
           if (archivoParaSubir instanceof Blob || archivoParaSubir instanceof File || (typeof archivoParaSubir === 'string' && archivoParaSubir.includes(','))) {
             try {
               urlFoto = await subirFoto(archivoParaSubir, nombreVendedor || "Usuario");
@@ -260,7 +283,6 @@ export default function SurveyView() {
           } else {
             urlFoto = typeof archivoParaSubir === 'string' && archivoParaSubir.startsWith('http') ? archivoParaSubir : null;
           }
-          
           await insertarRespuesta({ ...basePayload, fotourl: urlFoto }, tablaDestino);
         }
 
@@ -301,7 +323,6 @@ export default function SurveyView() {
             const persona = [...choferes, ...auxiliares].find(per => String(per.id_personal) === String(valor));
             textoCorreo = persona ? persona.nombre_completo : valor;
           }
-
           await insertarRespuesta(payload, tablaDestino);
         }
 
@@ -312,6 +333,7 @@ export default function SurveyView() {
         });
       }
 
+      // Enviar correo si corresponde
       if (!esOperario && !esLimpieza) {
         await enviarFormulario(listaParaCorreo);
       }
