@@ -224,7 +224,7 @@ export default function SurveyView() {
       try {
         setIsProcessing(true);
 
-        // 1. Definir rango de tiempo estricto para HOY en hora local mapeada a ISO
+        // 1. Rango de tiempo para HOY en hora local mapeada a ISO
         const inicioHoy = new Date();
         inicioHoy.setHours(0, 0, 0, 0);
 
@@ -236,49 +236,42 @@ export default function SurveyView() {
         if (esLimpieza) tablaCheck = "respuestas_limpieza";
         if (!esOperario && !esLimpieza) tablaCheck = "respuesta";
 
-        // 3. PASO 1: Buscar qué formularios del tipo actual se han creado HOY
+        // 3. Paso 1: Obtener todos los formularios creados hoy
         const { data: formulariosDeHoy, error: errFormularios } = await supabase
           .from('formularios_hechos')
           .select('id_formulario')
-          .eq('tipo_formulario', esLimpieza ? 'limpieza' : (esOperario ? 'operario' : 'general')) // Ajusta según tus strings exactos
           .gte('fecha', inicioHoy.toISOString())
           .lte('fecha', finHoy.toISOString());
 
-        if (errFormularios) {
-          console.error("Error obteniendo formularios de hoy:", errFormularios);
-        }
+        if (errFormularios) console.error("Error obteniendo formularios:", errFormularios);
 
-        // Si se encontraron formularios creados hoy, verificamos si el chofer ya respondió en alguno
+        // 4. Paso 2: Si hay formularios hoy, verificar las respuestas asociadas
         if (formulariosDeHoy && formulariosDeHoy.length > 0) {
           const listaIdsFormularios = formulariosDeHoy.map(f => f.id_formulario);
 
-          // PASO 2: Buscar si el chofer ya tiene una respuesta asociada a esos formularios de hoy
-          const { data: respuestaDuplicada, error: errRespuestas } = await supabase
+          const { data: respuestasChofer, error: errRespuestas } = await supabase
             .from(tablaCheck)
-            .select('id_respuesta')
+            .select('id_personal_respondido')
+            .in('id_formulario_vinculado', listaIdsFormularios)
             .eq('id_personal_respondido', parseInt(idPersonalSeleccionado))
-            .in('id_formulario', listaIdsFormularios) // Filtra solo en los formularios de hoy
-            .maybeSingle();
+            .not('id_personal_respondido', 'is', null); // <-- CLAVE: Ignoramos los registros NULL
 
-          if (errRespuestas) {
-            console.error("Error al verificar respuestas del chofer:", errRespuestas);
-          }
+          if (errRespuestas) console.error("Error validando respuestas:", errRespuestas);
 
-          // Si existe coincidencia, significa que ya hizo el checklist hoy
-          if (respuestaDuplicada) {
+          // Si el arreglo contiene elementos, significa que el chofer ya fue registrado hoy
+          if (respuestasChofer && respuestasChofer.length > 0) {
             const persona = [...choferes, ...auxiliares].find(per => String(per.id_personal) === String(idPersonalSeleccionado));
             const nombreChofer = persona ? persona.nombre_completo : "este conductor";
 
             alert(`Atención: El chofer ${nombreChofer} ya fue registrado en un checklist el día de hoy. Solo se permite un registro diario.`);
             setIsProcessing(false);
-            return; // Detiene la inserción por completo
+            return; // Detiene la inserción
           }
         }
       } catch (e) {
         console.error("Error en validación de duplicado:", e);
       }
     }
-
     // ==========================================
     // PASO 2: GUARDADO EN LA BASE DE DATOS
     // ==========================================
