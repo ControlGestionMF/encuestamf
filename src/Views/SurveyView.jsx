@@ -177,26 +177,22 @@ export default function SurveyView() {
     let patenteSeleccionada = null;
 
     // ==========================================
-    // PASO 1: VALIDACIÓN DE OBLIGATORIEDAD
+    // PASO 1: VALIDACIÓN DE OBLIGATORIEDAD Y DATOS CRÍTICOS
     // ==========================================
     for (const p of preguntas) {
       const idPreg = Number(p.idpregunta);
       const valor = respuestasActuales[p.idpregunta];
       const desc = p.descripcion?.toLowerCase().trim() || "";
 
-      // Capturar datos críticos solo si es encuesta de operario
-      if (esOperario) {
-        if (desc.includes("chofer") || desc.includes("conductor")) idPersonalSeleccionado = valor;
-        if (desc.includes("patente")) patenteSeleccionada = valor;
-      }
+      // Capturar datos críticos
+      if (desc.includes("chofer") || desc.includes("conductor")) idPersonalSeleccionado = valor;
+      if (desc.includes("patente")) patenteSeleccionada = valor;
 
       // --- LÓGICA DE EXCEPCIONES ---
       const esOpcionalPorPalabra = desc.includes("transporte");
       const esOpcionalPorConfig = configActual?.opcionales?.map(Number).includes(idPreg);
       
-      // Si el id es 54 O contiene "auxiliar", es opcional por defecto
       const esPreguntaAuxiliar = idPreg === 54 || desc.includes("auxiliar") || desc.includes("auxilíar");
-      
       const esRealmenteOpcional = esOpcionalPorPalabra || esOpcionalPorConfig || esPreguntaAuxiliar;
 
       // Si NO es opcional y está vacío, frenamos el envío inmediatamente
@@ -232,12 +228,49 @@ export default function SurveyView() {
     }
 
     // ==========================================
-    // PASO 2: GUARDADO EN LA BASE DE DATOS
+    // NUEVO: VALIDACIÓN DE REGISTRO ÚNICO POR DÍA
     // ==========================================
     try {
-      setIsProcessing(true);
-      const listaParaCorreo = [];
+      setIsProcessing(true); // Bloqueamos el botón temporalmente para la verificación
 
+      // Definimos el rango de tiempo para "el día de hoy" (desde las 00:00:00 hasta las 23:59:59)
+      const inicioHoy = new Date();
+      inicioHoy.setHours(0, 0, 0, 0);
+      const finHoy = new Date();
+      finHoy.setHours(23, 59, 59, 999);
+
+      let tablaDestino = esLimpieza ? "respuestas_limpieza" : (esOperario ? "respuestas_operario" : "respuesta");
+
+      if (esOperario && patenteSeleccionada) {
+        // Buscamos si existe una respuesta con esa misma patente creada HOY
+        const { data: yaExistePatente, error: errCheck } = await supabase
+          .from(tablaDestino)
+          .select(`
+            id_respuesta,
+            formularios_hechos!inner(created_at)
+          `)
+          .eq('descripcion', String(patenteSeleccionada).trim())
+          .gte('formularios_hechos.created_at', inicioHoy.toISOString())
+          .lte('formularios_hechos.created_at', finHoy.toISOString())
+          .maybeSingle();
+
+        if (errCheck) console.error("Error al verificar duplicado:", errCheck);
+
+        if (yaExistePatente) {
+          alert(`Error: La patente "${patenteSeleccionada}" ya fue registrada el día de hoy. Solo se permite un registro diario.`);
+          setIsProcessing(false);
+          return; // Detiene la ejecución por completo
+        }
+      }
+    } catch (e) {
+      console.error("Error en la validación de duplicados:", e);
+    }
+
+    // ==========================================
+    // PASO 2: GUARDADO EN LA BASE DE DATOS (Tu lógica normal)
+    // ==========================================
+    try {
+      const listaParaCorreo = [];
       let tablaDestino = "respuestas_operario";
       if (esLimpieza) tablaDestino = "respuestas_limpieza";
       if (!esOperario && !esLimpieza) tablaDestino = "respuesta";
@@ -333,7 +366,6 @@ export default function SurveyView() {
         });
       }
 
-      // Enviar correo si corresponde
       if (!esOperario && !esLimpieza) {
         await enviarFormulario(listaParaCorreo);
       }
