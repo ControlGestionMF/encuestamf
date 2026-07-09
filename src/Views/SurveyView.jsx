@@ -220,62 +220,68 @@ export default function SurveyView() {
     // =================================================================
     // CANDADO DIARIO (VALIDEZ PARA CHOFER SELECCIONADO)
     // =================================================================
-    try {
-      setIsProcessing(true);
+    if (idPersonalSeleccionado) {
+      try {
+        setIsProcessing(true);
 
-      // 1. Buscamos la respuesta del chofer dentro del arreglo real que vas a insertar
-      // (Reemplaza 'respuestasParaEnviar' por el nombre de tu variable de respuestas)
-      const preguntaChofer = respuestasParaEnviar.find(r => r.idpregunta === 39 || r.id_personal_respondido);
-      
-      // 2. Extraemos el número de ID (ya sea de la descripción o del campo de personal)
-      const idRealChofer = preguntaChofer 
-        ? parseInt(preguntaChofer.id_personal_respondido || preguntaChofer.descripcion) 
-        : null;
+        // Intentamos extraer el ID si viene como objeto o si es directamente el número
+        let idRealChofer = null;
+        if (typeof idPersonalSeleccionado === 'object' && idPersonalSeleccionado !== null) {
+          // Si es el objeto del chofer, buscamos su propiedad de ID (ej: id_personal o id)
+          idRealChofer = idPersonalSeleccionado.id_personal || idPersonalSeleccionado.id;
+        } else {
+          idRealChofer = idPersonalSeleccionado;
+        }
 
-      // Si encontramos un ID válido, ejecutamos la seguridad
-      if (idRealChofer && !isNaN(idRealChofer)) {
-        
-        // Creamos el rango de tiempo para el día de HOY
-        const inicioHoy = new Date();
-        inicioHoy.setHours(0, 0, 0, 0);
-        const finHoy = new Date();
-        finHoy.setHours(23, 59, 59, 999);
+        const idNumerico = parseInt(idRealChofer);
 
-        // Primero revisamos qué formularios se han creado hoy en la cabecera
-        const { data: formulariosDeHoy } = await supabase
-          .from('formularios_hechos')
-          .select('id_formulario')
-          .gte('fecha', inicioHoy.toISOString())
-          .lte('fecha', finHoy.toISOString());
-
-        if (formulariosDeHoy && formulariosDeHoy.length > 0) {
-          const idsFormulariosHoy = formulariosDeHoy.map(f => f.id_formulario);
+        // Solo ejecutamos el candado si logramos rescatar un número válido
+        if (idNumerico && !isNaN(idNumerico)) {
+          const inicioHoy = new Date();
+          inicioHoy.setHours(0, 0, 0, 0);
           
-          // Elegimos la tabla correcta según el tipo de checklist
-          let tablaCheck = "respuestas_operario";
-          if (esLimpieza) tablaCheck = "respuestas_limpieza";
-          if (!esOperario && !esLimpieza) tablaCheck = "respuesta";
+          const finHoy = new Date();
+          finHoy.setHours(23, 59, 59, 999);
 
-          // Buscamos si este ID de chofer ya respondió en los formularios de hoy
-          const { data: coincidencias } = await supabase
-            .from(tablaCheck)
-            .select('id_respuesta')
-            .in('id_formulario_vinculado', idsFormulariosHoy)
-            .eq('id_personal_respondido', idRealChofer);
+          // 1. Buscamos qué formularios se crearon hoy en la cabecera
+          const { data: formulariosDeHoy, error: errFormularios } = await supabase
+            .from('formularios_hechos')
+            .select('id_formulario')
+            .gte('fecha', inicioHoy.toISOString())
+            .lte('fecha', finHoy.toISOString());
 
-          // ¡Si hay coincidencia, bloqueamos!
-          if (coincidencias && coincidencias.length > 0) {
-            const persona = [...choferes, ...auxiliares].find(per => String(per.id_personal) === String(idRealChofer));
-            const nombreChofer = persona ? persona.nombre_completo : "este conductor";
+          if (errFormularios) console.error("Error cabeceras:", errFormularios);
 
-            alert(`Atención: El chofer ${nombreChofer} ya fue registrado en un checklist el día de hoy. Solo se permite un registro diario.`);
-            setIsProcessing(false);
-            return; // Detiene la ejecución y no guarda nada en la base de datos
+          if (formulariosDeHoy && formulariosDeHoy.length > 0) {
+            const idsFormulariosHoy = formulariosDeHoy.map(f => f.id_formulario);
+            
+            let tablaCheck = "respuestas_operario";
+            if (esLimpieza) tablaCheck = "respuestas_limpieza";
+            if (!esOperario && !esLimpieza) tablaCheck = "respuesta";
+
+            // 2. Buscamos si el ID del chofer ya está en las respuestas de hoy
+            const { data: coincidencias, error: errMatch } = await supabase
+              .from(tablaCheck)
+              .select('id_respuesta')
+              .in('id_formulario_vinculado', idsFormulariosHoy)
+              .eq('id_personal_respondido', idNumerico);
+
+            if (errMatch) console.error("Error coincidencias:", errMatch);
+
+            // Si hay registros, significa que ya trabajó hoy. ¡Bloqueamos!
+            if (coincidencias && coincidencias.length > 0) {
+              const persona = [...choferes, ...auxiliares].find(per => String(per.id_personal) === String(idNumerico));
+              const nombreChofer = persona ? persona.nombre_completo : "este conductor";
+
+              alert(`Atención: El chofer ${nombreChofer} ya fue registrado en un checklist el día de hoy. Solo se permite un registro diario.`);
+              setIsProcessing(false);
+              return; // Detiene el envío por completo
+            }
           }
         }
+      } catch (e) {
+        console.error("Error crítico en el candado:", e);
       }
-    } catch (error) {
-      console.error("Error en el candado de seguridad:", error);
     }
     // ==========================================
     // PASO 2: GUARDADO EN LA BASE DE DATOS
