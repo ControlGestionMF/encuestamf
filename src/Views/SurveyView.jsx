@@ -255,7 +255,7 @@ export default function SurveyView() {
           // 2. Buscamos si ese ID de chofer ya guardó una respuesta hoy
           const { data: coincidencias, error: errMatch } = await supabase
             .from(tablaCheck)
-            .select('id_respuesta')
+            .select('id_formulario_vinculado')
             .in('id_formulario_vinculado', idsFormulariosHoy)
             .eq('id_personal_respondido', idNumerico);
 
