@@ -57,70 +57,68 @@ export default function SurveyView() {
   const tipoActual = idEncuesta?.toLowerCase().includes("limpieza") ? "limpieza" : "operario";
 
   useEffect(() => {
-  if (!idUsuario) { navigate("/"); return; }
+    if (!idUsuario) { navigate("/"); return; }
 
-  async function cargarDatosIniciales() {
-    try {
-      // Traer Choferes
-      const { data: dataChoferes } = await supabase
-        .from("personal_operativo")
-        .select("id_personal, nombre_completo") // Traemos el ID también
-        .eq("tipo_personal", "chofer")
-        .eq("activo", true);
-      if (dataChoferes) setChoferes(dataChoferes);
+    async function cargarDatosIniciales() {
+      try {
+        // Traer Choferes
+        const { data: dataChoferes } = await supabase
+          .from("personal_operativo")
+          .select("id_personal, nombre_completo") 
+          .eq("tipo_personal", "chofer")
+          .eq("activo", true);
+        if (dataChoferes) setChoferes(dataChoferes);
 
-      // Traer Auxiliares (NUEVO)
-      const { data: dataAuxiliares } = await supabase
-        .from("personal_operativo")
-        .select("id_personal, nombre_completo")
-        .eq("tipo_personal", "auxiliar")
-        .eq("activo", true);
-      if (dataAuxiliares) setAuxiliares(dataAuxiliares);
+        // Traer Auxiliares
+        const { data: dataAuxiliares } = await supabase
+          .from("personal_operativo")
+          .select("id_personal, nombre_completo")
+          .eq("tipo_personal", "auxiliar")
+          .eq("activo", true);
+        if (dataAuxiliares) setAuxiliares(dataAuxiliares);
 
-      const listaTotal = await getPreguntas();
-      
-      // LOGS CRUCIALES - Mira estos en la consola (F12)
-      // En SurveyView.jsx cambia la línea 46 por esta:
-      console.log("Estructura de la primera pregunta:", listaTotal[0]);
-      console.log("2. ¿Qué categoría busco?:", idEncuesta);
+        const listaTotal = await getPreguntas();
+        
+        console.log("Estructura de la primera pregunta:", listaTotal[0]);
+        console.log("2. ¿Qué categoría busco?:", idEncuesta);
 
-      // Filtramos con cuidado extremo (quitando espacios y comparando minúsculas)
-      const filtradas = listaTotal.filter(p => {
-        const catPregunta = String(p.tipo_formulario || "").trim().toLowerCase();
-        const catURL = String(idEncuesta || "").trim().toLowerCase();
-        return catPregunta === catURL;
-      });
+        // Filtramos con cuidado extremo
+        const filtradas = listaTotal.filter(p => {
+          const catPregunta = String(p.tipo_formulario || "").trim().toLowerCase();
+          const catURL = String(idEncuesta || "").trim().toLowerCase();
+          return catPregunta === catURL;
+        });
 
-      console.log("3. Preguntas después de filtrar:", filtradas);
+        console.log("3. Preguntas después de filtrar:", filtradas);
 
-      const tipoActual = idEncuesta?.toLowerCase().includes("limpieza") ? "limpieza" : "operario";
-      const mapaOrdenActual = CONFIG_ENCUESTAS[tipoActual]?.orden || {};
+        // CORREGIDO: Usamos directamente la variable externa tipoActual en vez de redeclararla
+        const mapaOrdenActual = CONFIG_ENCUESTAS[tipoActual]?.orden || {};
 
-      const ordenadas = filtradas.sort((a, b) => {
-        const ordenA = mapaOrdenActual[Number(a.idpregunta)] || 99;
-        const ordenB = mapaOrdenActual[Number(b.idpregunta)] || 99;
-        return ordenA - ordenB;
-      });
+        const ordenadas = filtradas.sort((a, b) => {
+          const ordenA = mapaOrdenActual[Number(a.idpregunta)] || 99;
+          const ordenB = mapaOrdenActual[Number(b.idpregunta)] || 99;
+          return ordenA - ordenB;
+        });
 
-      if (ordenadas.length === 0) {
-        console.warn("AVISO: El filtro dejó 0 preguntas. Revisa si en Supabase escribiste 'operario' igual que en la URL.");
-      }
-
-      setPreguntas(ordenadas);
-
-      const map = {};
-      for (const p of ordenadas) {
-        if (p.tipopregunta === "unica" || p.tipopregunta === "multiple") {
-          map[p.idpregunta] = await getOpciones(p.idpregunta);
+        if (ordenadas.length === 0) {
+          console.warn("AVISO: El filtro dejó 0 preguntas. Revisa si en Supabase escribiste 'operario' igual que en la URL.");
         }
+
+        setPreguntas(ordenadas);
+
+        const map = {};
+        for (const p of ordenadas) {
+          if (p.tipopregunta === "unica" || p.tipopregunta === "multiple") {
+            map[p.idpregunta] = await getOpciones(p.idpregunta);
+          }
+        }
+        setOpcionesMap(map);
+      } catch (error) {
+        console.error("Error grave en la carga:", error);
       }
-      setOpcionesMap(map);
-    } catch (error) {
-      console.error("Error grave en la carga:", error);
     }
-  }
-  cargarDatosIniciales();
-}, [idEncuesta, idUsuario, navigate, tipoActual]);
+    cargarDatosIniciales();
+  }, [idEncuesta, idUsuario, navigate, tipoActual]);
 
   const handleCambioRespuesta = (idPregunta, valor) => {
     setRespuestasValues(prev => ({ ...prev, [idPregunta]: valor }));
@@ -128,15 +126,13 @@ export default function SurveyView() {
 
   const enviarFormulario = async (respuestasFinales) => {
     try {
-      // 1. Recuperamos el ID del supervisor
       const idSup = sessionStorage.getItem("id_supervisor");
 
       if (!idSup || idSup === "undefined") {
         console.error("No se encontró id_supervisor en el almacenamiento.");
-        return; // Detenemos si no hay a quién buscar
+        return;
       }
 
-      // 2. Buscamos los datos del supervisor en la base de datos
       const { data: supervisor, error: supError } = await supabase
         .from("supervisor")
         .select("email, nombre")
@@ -148,18 +144,16 @@ export default function SurveyView() {
         return;
       }
 
-      // 3. Invocamos la Edge Function de Supabase
       const { error: invokeError } = await supabase.functions.invoke('enviar-correo', {
         body: {
-          email: supervisor.email,        // Destinatario dinámico
+          email: supervisor.email,
           nombreSupervisor: supervisor.nombre,
-          encuestado: nombreVendedor,     // Declarado arriba en el componente
-          respuestas: respuestasFinales   // Array con textos y fotos
+          encuestado: nombreVendedor,
+          respuestas: respuestasFinales
         },
       });
 
       if (invokeError) throw invokeError;
-      
       console.log("Notificación enviada con éxito a:", supervisor.email);
 
     } catch (err) {
@@ -177,25 +171,22 @@ export default function SurveyView() {
     let patenteSeleccionada = null;
 
     // ==========================================
-    // PASO 1: VALIDACIÓN DE OBLIGATORIEDAD Y DATOS CRÍTICOS
+    // PASO 1: VALIDACIÓN DE OBLIGATORIEDAD
     // ==========================================
     for (const p of preguntas) {
       const idPreg = Number(p.idpregunta);
       const valor = respuestasActuales[p.idpregunta];
       const desc = p.descripcion?.toLowerCase().trim() || "";
 
-      // Capturar datos críticos
       if (desc.includes("chofer") || desc.includes("conductor")) idPersonalSeleccionado = valor;
       if (desc.includes("patente")) patenteSeleccionada = valor;
 
-      // --- LÓGICA DE EXCEPCIONES ---
       const esOpcionalPorPalabra = desc.includes("transporte");
       const esOpcionalPorConfig = configActual?.opcionales?.map(Number).includes(idPreg);
-      
       const esPreguntaAuxiliar = idPreg === 54 || desc.includes("auxiliar") || desc.includes("auxilíar");
+      
       const esRealmenteOpcional = esOpcionalPorPalabra || esOpcionalPorConfig || esPreguntaAuxiliar;
 
-      // Si NO es opcional y está vacío, frenamos el envío inmediatamente
       if (!esRealmenteOpcional && (valor === null || valor === undefined || String(valor).trim() === "")) {
         alert(`La pregunta "${p.descripcion}" es obligatoria.`);
         return; 
@@ -204,7 +195,6 @@ export default function SurveyView() {
     
     // --- CONTROL DE SEGURIDAD EXCLUSIVO PARA OPERARIO ---
     if (esOperario) {
-      // Rescate por si el estado venía con desfase en el render móvil
       if (!idPersonalSeleccionado || !patenteSeleccionada) {
         for (const p of preguntas) {
           const desc = p.descripcion?.toLowerCase().trim() || "";
@@ -227,55 +217,59 @@ export default function SurveyView() {
       }
     }
 
-    // ==========================================
-    // NUEVO: VALIDACIÓN DE REGISTRO ÚNICO POR DÍA
-    // ==========================================
-    try {
-      setIsProcessing(true); // Bloqueamos el botón temporalmente para la verificación
+    // =================================================================
+    // CANDADO DIARIO (VALIDEZ PARA CHOFER SELECCIONADO)
+    // =================================================================
+    if (idPersonalSeleccionado) {
+      try {
+        setIsProcessing(true);
 
-      // Definimos el rango de tiempo para "el día de hoy" (desde las 00:00:00 hasta las 23:59:59)
-      const inicioHoy = new Date();
-      inicioHoy.setHours(0, 0, 0, 0);
-      const finHoy = new Date();
-      finHoy.setHours(23, 59, 59, 999);
+        const inicioHoy = new Date();
+        inicioHoy.setHours(0, 0, 0, 0);
+        const finHoy = new Date();
+        finHoy.setHours(23, 59, 59, 999);
 
-      let tablaDestino = esLimpieza ? "respuestas_limpieza" : (esOperario ? "respuestas_operario" : "respuesta");
+        let tablaCheck = "respuestas_operario";
+        if (esLimpieza) tablaCheck = "respuestas_limpieza";
+        if (!esOperario && !esLimpieza) tablaCheck = "respuesta";
 
-      if (esOperario && patenteSeleccionada) {
-        // Buscamos si existe una respuesta con esa misma patente creada HOY
-        const { data: yaExistePatente, error: errCheck } = await supabase
-          .from(tablaDestino)
+        const { data: choferDuplicado, error: errCheck } = await supabase
+          .from(tablaCheck)
           .select(`
             id_respuesta,
             formularios_hechos!inner(created_at)
           `)
-          .eq('descripcion', String(patenteSeleccionada).trim())
+          .eq('id_personal_respondido', parseInt(idPersonalSeleccionado))
           .gte('formularios_hechos.created_at', inicioHoy.toISOString())
           .lte('formularios_hechos.created_at', finHoy.toISOString())
           .maybeSingle();
 
-        if (errCheck) console.error("Error al verificar duplicado:", errCheck);
+        if (errCheck) console.error("Error al verificar duplicado diario:", errCheck);
 
-        if (yaExistePatente) {
-          alert(`Error: La patente "${patenteSeleccionada}" ya fue registrada el día de hoy. Solo se permite un registro diario.`);
+        if (choferDuplicado) {
+          const persona = [...choferes, ...auxiliares].find(per => String(per.id_personal) === String(idPersonalSeleccionado));
+          const nombreChofer = persona ? persona.nombre_completo : "este conductor";
+
+          alert(`Atención: El chofer ${nombreChofer} ya fue registrado en un checklist el día de hoy. Solo se permite un registro diario.`);
           setIsProcessing(false);
-          return; // Detiene la ejecución por completo
+          return; 
         }
+      } catch (e) {
+        console.error("Error en validación de duplicado:", e);
       }
-    } catch (e) {
-      console.error("Error en la validación de duplicados:", e);
     }
 
     // ==========================================
-    // PASO 2: GUARDADO EN LA BASE DE DATOS (Tu lógica normal)
+    // PASO 2: GUARDADO EN LA BASE DE DATOS
     // ==========================================
     try {
+      setIsProcessing(true);
       const listaParaCorreo = [];
+
       let tablaDestino = "respuestas_operario";
       if (esLimpieza) tablaDestino = "respuestas_limpieza";
       if (!esOperario && !esLimpieza) tablaDestino = "respuesta";
 
-      // Crear la cabecera del formulario
       const { data: cabecera, error: errCabecera } = await supabase
         .from('formularios_hechos')
         .insert([{
@@ -289,7 +283,6 @@ export default function SurveyView() {
       if (errCabecera) throw new Error("Error al crear cabecera: " + errCabecera.message);
       const nuevoIdFormulario = cabecera.id_formulario;
 
-      // Procesar e insertar las respuestas válidas
       for (const p of preguntas) {
         const valor = respuestasActuales[p.idpregunta];
         const tipo = p.tipopregunta ? p.tipopregunta.trim().toLowerCase() : "";
@@ -304,7 +297,6 @@ export default function SurveyView() {
           descripcion: null
         };
         
-        // 1. Fotos y Firmas
         if ((tipo === "foto" || tipo === "firma") && valor) {
           let archivoParaSubir = valor.blob ? valor.blob : valor;
           if (archivoParaSubir instanceof Blob || archivoParaSubir instanceof File || (typeof archivoParaSubir === 'string' && archivoParaSubir.includes(','))) {
@@ -319,7 +311,6 @@ export default function SurveyView() {
           await insertarRespuesta({ ...basePayload, fotourl: urlFoto }, tablaDestino);
         }
 
-        // 2. Selección Única
         else if (tipo === "unica") {
           const comentarioExtra = observacionesExtra[p.idpregunta] || null;
           await insertarRespuesta({
@@ -331,7 +322,6 @@ export default function SurveyView() {
           textoCorreo = opt ? (comentarioExtra ? `${opt.descripcion} (Nota: ${comentarioExtra})` : opt.descripcion) : valor;
         } 
         
-        // 3. Selección Múltiple
         else if (tipo === "multiple" && valor) {
           const ids = String(valor).split(",");
           const nombresSeleccionados = [];
@@ -344,7 +334,6 @@ export default function SurveyView() {
           textoCorreo = nombresSeleccionados.join(", ");
         } 
         
-        // 4. Texto / Selects Dinámicos
         else {
           const esPreguntaChofer = p.descripcion.toLowerCase().includes("chofer") || p.descripcion.toLowerCase().includes("conductor");
           const esPreguntaAuxiliar = p.descripcion.toLowerCase().includes("auxiliar");
@@ -384,39 +373,33 @@ export default function SurveyView() {
     }
   };
 
-const idLow = String(idEncuesta).toLowerCase();
-const tituloDinamico = idLow.includes("operario") 
-  ? "Checklist Camión" 
-  : idLow.includes("limpieza") 
-    ? "Checklist Limpieza" 
-    : "Registro de Visita";
+  const idLow = String(idEncuesta).toLowerCase();
+  const tituloDinamico = idLow.includes("operario") 
+    ? "Checklist Camión" 
+    : idLow.includes("limpieza") 
+      ? "Checklist Limpieza" 
+      : "Registro de Visita";
 
-const badgeLabel = (idLow.includes("operario") || idLow.includes("limpieza"))
-  ? "Operador: " 
-  : "Vendedor: ";
+  const badgeLabel = (idLow.includes("operario") || idLow.includes("limpieza"))
+    ? "Operador: " 
+    : "Vendedor: ";
 
   return (
     <div className="cuestionario-wrapper">
       <div className="cuestionario-container">
-        {/* TÍTULO ACTUALIZADO */}
-        <h1 className="titulo-encuesta">
-          {tituloDinamico}
-        </h1>
+        <h1 className="titulo-encuesta">{tituloDinamico}</h1>
 
         <div className="vendedor-badge">
-          {badgeLabel} 
-          <strong>{nombreVendedor}</strong>
+          {badgeLabel} <strong>{nombreVendedor}</strong>
         </div>
 
         {preguntas.map((p, index) => {
           const esOperario = idEncuesta?.toLowerCase().includes("operario");
-          // Usamos la constante que sacamos fuera
           const mapaOrdenActual = CONFIG_ENCUESTAS[tipoActual]?.orden || {};
           const numeroOrden = mapaOrdenActual[p.idpregunta];
 
           return (
             <div key={p.idpregunta}>
-              {/* SECCIÓN 1: Solo Operario, Orden 1 */}
               {esOperario && numeroOrden === 1 && (
                 <div className="seccion-titulo-container">
                   <h2 className="titulo-seccion-moderno">Tipo de documentación y seguridad</h2>
@@ -424,7 +407,6 @@ const badgeLabel = (idLow.includes("operario") || idLow.includes("limpieza"))
                 </div>
               )}
 
-              {/* SECCIÓN 2: Solo Operario, Orden 8 */}
               {esOperario && numeroOrden === 8 && (
                 <div className="seccion-titulo-container" style={{ marginTop: '40px' }}>
                   <h2 className="titulo-seccion-moderno">Revisión exterior</h2>
@@ -435,7 +417,6 @@ const badgeLabel = (idLow.includes("operario") || idLow.includes("limpieza"))
               <div className="cuestionario-card section-pregunta">
                 <h3 className="pregunta-descripcion">{p.descripcion}</h3>
 
-                {/* CASO ÚNICA */}
                 {p.tipopregunta === "unica" && (
                   <> 
                     <CuestionarioUnico 
@@ -443,30 +424,18 @@ const badgeLabel = (idLow.includes("operario") || idLow.includes("limpieza"))
                       onNext={(val) => handleCambioRespuesta(p.idpregunta, val)} 
                       currentValue={respuestasValues[p.idpregunta]}
                     />
-                    
                     {(() => {
                       const opcionElegida = opcionesMap[p.idpregunta]?.find(
                         o => String(o.idopcion) === String(respuestasValues[p.idpregunta])
                       );
-                      
                       const descripcionUpper = opcionElegida?.descripcion?.toUpperCase() || "";
-                      const mostrarInput = descripcionUpper.includes("REQUIERE ATENCIÓN") || 
-                                          descripcionUpper === "OTRO";
+                      const mostrarInput = descripcionUpper.includes("REQUIERE ATENCIÓN") || descripcionUpper === "OTRO";
 
                       return mostrarInput ? (
                         <textarea
                           className="input-texto-moderno"
                           placeholder="Especifique el motivo o detalle..."
-                          style={{ 
-                            marginTop: '15px', 
-                            height: '90px', 
-                            padding: '12px',
-                            borderColor: '#1FB436', 
-                            borderWidth: '2px',
-                            width: '100%',
-                            borderRadius: '8px',
-                            display: 'block' // Asegura que ocupe su propia línea
-                          }}
+                          style={{ marginTop: '15px', height: '90px', padding: '12px', borderColor: '#1FB436', borderWidth: '2px', width: '100%', borderRadius: '8px', display: 'block' }}
                           value={observacionesExtra[p.idpregunta] || ""}
                           onChange={(e) => handleCambioObservacion(p.idpregunta, e.target.value)}
                         />
@@ -475,17 +444,14 @@ const badgeLabel = (idLow.includes("operario") || idLow.includes("limpieza"))
                   </>
                 )}
 
-                {/* CASO FOTO */}
                 {p.tipopregunta === "foto" && (
                   <CuestionarioFoto onNext={(val) => handleCambioRespuesta(p.idpregunta, val)} />
                 )}
 
-                {/* CASO FIRMA */}
                 {p.tipopregunta === "firma" && (
                   <CuestionarioFirma onNext={(val) => handleCambioRespuesta(p.idpregunta, val)} />
                 )}
 
-                {/* CASO MÚLTIPLE */}
                 {p.tipopregunta === "multiple" && (
                   <CuestionarioMultiple 
                     opciones={opcionesMap[p.idpregunta] || []} 
@@ -494,7 +460,6 @@ const badgeLabel = (idLow.includes("operario") || idLow.includes("limpieza"))
                   />
                 )}
 
-                {/* CASO TEXTO (Chofer, Región y Comuna filtrable) */}
                 {p.tipopregunta === "texto" && (
                   <>
                     {(p.descripcion.toLowerCase().includes("chofer") || p.descripcion.toLowerCase().includes("conductor")) ? (
@@ -505,9 +470,7 @@ const badgeLabel = (idLow.includes("operario") || idLow.includes("limpieza"))
                       >
                         <option value="">- Seleccione un Chofer -</option>
                         {choferes.map((c) => (
-                          <option key={c.id_personal} value={c.id_personal}>
-                            {c.nombre_completo}
-                          </option>
+                          <option key={c.id_personal} value={c.id_personal}>{c.nombre_completo}</option>
                         ))}
                       </select>
                     ) : p.descripcion.toLowerCase().includes("auxiliar") ? (
@@ -518,9 +481,7 @@ const badgeLabel = (idLow.includes("operario") || idLow.includes("limpieza"))
                       >
                         <option value="">- Seleccione Auxiliar -</option>
                         {auxiliares.map((a) => (
-                          <option key={a.id_personal} value={a.id_personal}>
-                            {a.nombre_completo}
-                          </option>
+                          <option key={a.id_personal} value={a.id_personal}>{a.nombre_completo}</option>
                         ))}
                       </select>
                     ) : (p.descripcion.toLowerCase().includes("región") || p.descripcion.toLowerCase().includes("region")) ? (
@@ -530,7 +491,6 @@ const badgeLabel = (idLow.includes("operario") || idLow.includes("limpieza"))
                         onChange={(e) => {
                           setRegionActiva(e.target.value);
                           handleCambioRespuesta(p.idpregunta, e.target.value);
-                          // Limpiar comuna si cambia la región
                           const pComuna = preguntas.find(preg => preg.descripcion.toLowerCase().includes("comuna"));
                           if (pComuna) handleCambioRespuesta(pComuna.idpregunta, "");
                         }}
@@ -544,11 +504,14 @@ const badgeLabel = (idLow.includes("operario") || idLow.includes("limpieza"))
                           type="text" 
                           className="input-texto-moderno"
                           placeholder={regionActiva ? "Escribe para buscar comuna..." : "Seleccione región primero"}
-                          value={respuestasValues[p.idpregunta] || busquedaComuna}
+                          value={respuestasValues[p.idpregunta] !== undefined ? respuestasValues[p.idpregunta] : busquedaComuna}
                           disabled={!regionActiva}
-                          onChange={(e) => setBusquedaComuna(e.target.value)}
+                          onChange={(e) => {
+                            setBusquedaComuna(e.target.value);
+                            handleCambioRespuesta(p.idpregunta, e.target.value);
+                          }}
                         />
-                        {regionActiva && busquedaComuna && !respuestasValues[p.idpregunta] && (
+                        {regionActiva && busquedaComuna && !preguntas.find(preg => preg.descripcion.toLowerCase().includes("comuna") && respuestasValues[preg.idpregunta] === busquedaComuna) && (
                           <ul className="sugerencias-lista">
                             {regionesChile
                               .find(r => r.region === regionActiva)
@@ -569,7 +532,6 @@ const badgeLabel = (idLow.includes("operario") || idLow.includes("limpieza"))
                         onNext={(val) => handleCambioRespuesta(p.idpregunta, val)}
                         currentValue={respuestasValues[p.idpregunta]}
                         placeholder={p.descripcion}
-                        // SI EL ID ES 54, SE VOLVERÁ UN TEXTAREA AUTOMÁTICAMENTE
                         multiline={p.idpregunta === 54 || p.descripcion.toLowerCase().includes("comentario")}
                       />
                     )}
