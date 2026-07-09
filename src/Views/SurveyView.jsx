@@ -224,52 +224,72 @@ export default function SurveyView() {
       try {
         setIsProcessing(true);
 
-        // 1. Rango de tiempo para HOY en hora local mapeada a ISO
         const inicioHoy = new Date();
         inicioHoy.setHours(0, 0, 0, 0);
 
         const finHoy = new Date();
         finHoy.setHours(23, 59, 59, 999);
 
-        // 2. Determinar la tabla de respuestas correspondiente
-        let tablaCheck = "respuestas_operario";
-        if (esLimpieza) tablaCheck = "respuestas_limpieza";
-        if (!esOperario && !esLimpieza) tablaCheck = "respuesta";
+        // Debug 1: Ver qué datos está recibiendo el componente al intentar guardar
+        console.log("=== DATOS ENTRANTES AL CANDADO ===");
+        console.log("ID Personal Seleccionado:", idPersonalSeleccionado);
+        console.log("Tipo (esLimpieza):", esLimpieza, " | Tipo (esOperario):", esOperario);
+        console.log("Rango Buscado Local:", inicioHoy.toString(), "hasta", finHoy.toString());
+        console.log("Rango Buscado ISO:", inicioHoy.toISOString(), "hasta", finHoy.toISOString());
 
-        // 3. Paso 1: Obtener todos los formularios creados hoy
-        const { data: formulariosDeHoy, error: errFormularios } = await supabase
+        // 1. Busquemos TODOS los formularios de hoy sin importar el tipo primero, para ver si encuentra algo
+        const { data: todosHoy, error: errTodos } = await supabase
           .from('formularios_hechos')
-          .select('id_formulario')
+          .select('id_formulario, tipo_formulario, fecha')
           .gte('fecha', inicioHoy.toISOString())
           .lte('fecha', finHoy.toISOString());
 
-        if (errFormularios) console.error("Error obteniendo formularios:", errFormularios);
+        if (errTodos) console.error("Error trayendo formularios hechos:", errTodos);
+        
+        console.log("Formularios totales encontrados hoy en la base de datos:", todosHoy);
 
-        // 4. Paso 2: Si hay formularios hoy, verificar las respuestas asociadas
-        if (formulariosDeHoy && formulariosDeHoy.length > 0) {
-          const listaIdsFormularios = formulariosDeHoy.map(f => f.id_formulario);
+        if (todosHoy && todosHoy.length > 0) {
+          const idsFormulariosHoy = todosHoy.map(f => f.id_formulario);
+          
+          let tablaCheck = "respuestas_operario";
+          if (esLimpieza) tablaCheck = "respuestas_limpieza";
+          if (!esOperario && !esLimpieza) tablaCheck = "respuesta";
 
-          const { data: respuestasChofer, error: errRespuestas } = await supabase
+          console.log(`Buscando en la tabla [${tablaCheck}] usando los IDs:`, idsFormulariosHoy);
+
+          // 2. Buscamos si el ID de la persona existe en esas respuestas
+          const { data: coincidencias, error: errMatch } = await supabase
             .from(tablaCheck)
-            .select('id_personal_respondido')
-            .in('id_formulario_vinculado', listaIdsFormularios)
-            .eq('id_personal_respondido', parseInt(idPersonalSeleccionado))
-            .not('id_personal_respondido', 'is', null); // <-- CLAVE: Ignoramos los registros NULL
+            .select('id_respuesta, id_formulario_vinculado, id_personal_respondido')
+            .in('id_formulario_vinculado', idsFormulariosHoy);
 
-          if (errRespuestas) console.error("Error validando respuestas:", errRespuestas);
+          if (errMatch) console.error("Error buscando coincidencias en respuestas:", errMatch);
 
-          // Si el arreglo contiene elementos, significa que el chofer ya fue registrado hoy
-          if (respuestasChofer && respuestasChofer.length > 0) {
+          console.log("Todas las respuestas encontradas para los formularios de hoy:", coincidencias);
+
+          // Evaluamos manualmente en JavaScript para asegurar que no haya problemas de tipos (string vs int)
+          const yaExiste = coincidencias?.some(resp => 
+            String(resp.id_personal_respondido) === String(idPersonalSeleccionado)
+          );
+
+          if (yaExiste) {
+            console.log("¡MATCH ENCONTRADO! El chofer ya existe en los registros de hoy.");
+            
             const persona = [...choferes, ...auxiliares].find(per => String(per.id_personal) === String(idPersonalSeleccionado));
             const nombreChofer = persona ? persona.nombre_completo : "este conductor";
 
-            alert(`Atención: El chofer ${nombreChofer} ya fue registrado en un checklist el día de hoy. Solo se permite un registro diario.`);
+            alert(`Atención: El chofer ${nombreChofer} ya fue registrado en un checklist el día de hoy.`);
             setIsProcessing(false);
-            return; // Detiene la inserción
+            return; // Bloqueo total
+          } else {
+            console.log("No se encontró coincidencia exacta de ID de chofer en las respuestas de hoy.");
           }
+        } else {
+          console.log("No hay ningún formulario registrado hoy en la tabla formularios_hechos.");
         }
+
       } catch (e) {
-        console.error("Error en validación de duplicado:", e);
+        console.error("Error crítico en el candado:", e);
       }
     }
     // ==========================================
