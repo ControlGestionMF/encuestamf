@@ -224,33 +224,43 @@ export default function SurveyView() {
       try {
         setIsProcessing(true);
 
-        // Intentamos extraer el ID si viene como objeto o si es directamente el número
         let idRealChofer = null;
+
+        // 1. Validamos rigurosamente qué tipo de dato contiene la variable
         if (typeof idPersonalSeleccionado === 'object' && idPersonalSeleccionado !== null) {
-          // Si es el objeto del chofer, buscamos su propiedad de ID (ej: id_personal o id)
-          idRealChofer = idPersonalSeleccionado.id_personal || idPersonalSeleccionado.id;
-        } else {
+          // Si es un objeto, verificamos que no sea un Blob o un archivo de imagen
+          if (!idPersonalSeleccionado.base64 && !idPersonalSeleccionado.size) {
+            idRealChofer = idPersonalSeleccionado.id_personal || idPersonalSeleccionado.id;
+          }
+        } else if (typeof idPersonalSeleccionado === 'string') {
+          // Si es un string, nos aseguramos de que NO sea una imagen en Base64
+          if (!idPersonalSeleccionado.startsWith('data:') && !idPersonalSeleccionado.includes('base64')) {
+            idRealChofer = idPersonalSeleccionado;
+          }
+        } else if (typeof idPersonalSeleccionado === 'number') {
           idRealChofer = idPersonalSeleccionado;
         }
 
         const idNumerico = parseInt(idRealChofer);
 
-        // Solo ejecutamos el candado si logramos rescatar un número válido
+        // 2. Solo si es un número de ID limpio y válido, consultamos la base de datos
         if (idNumerico && !isNaN(idNumerico)) {
+          console.log("🛡️ Candado activado para validar ID de Chofer:", idNumerico);
+
           const inicioHoy = new Date();
           inicioHoy.setHours(0, 0, 0, 0);
           
           const finHoy = new Date();
           finHoy.setHours(23, 59, 59, 999);
 
-          // 1. Buscamos qué formularios se crearon hoy en la cabecera
+          // Buscar los formularios generales creados hoy
           const { data: formulariosDeHoy, error: errFormularios } = await supabase
             .from('formularios_hechos')
             .select('id_formulario')
             .gte('fecha', inicioHoy.toISOString())
             .lte('fecha', finHoy.toISOString());
 
-          if (errFormularios) console.error("Error cabeceras:", errFormularios);
+          if (errFormularios) console.error("Error en cabeceras:", errFormularios);
 
           if (formulariosDeHoy && formulariosDeHoy.length > 0) {
             const idsFormulariosHoy = formulariosDeHoy.map(f => f.id_formulario);
@@ -259,25 +269,27 @@ export default function SurveyView() {
             if (esLimpieza) tablaCheck = "respuestas_limpieza";
             if (!esOperario && !esLimpieza) tablaCheck = "respuesta";
 
-            // 2. Buscamos si el ID del chofer ya está en las respuestas de hoy
+            // Buscar si el ID del chofer ya contestó en los formularios de hoy
             const { data: coincidencias, error: errMatch } = await supabase
               .from(tablaCheck)
               .select('id_respuesta')
               .in('id_formulario_vinculado', idsFormulariosHoy)
               .eq('id_personal_respondido', idNumerico);
 
-            if (errMatch) console.error("Error coincidencias:", errMatch);
+            if (errMatch) console.error("Error en coincidencias:", errMatch);
 
-            // Si hay registros, significa que ya trabajó hoy. ¡Bloqueamos!
+            // ¡Coincidencia encontrada! Se frena el flujo y salta la alerta
             if (coincidencias && coincidencias.length > 0) {
               const persona = [...choferes, ...auxiliares].find(per => String(per.id_personal) === String(idNumerico));
               const nombreChofer = persona ? persona.nombre_completo : "este conductor";
 
               alert(`Atención: El chofer ${nombreChofer} ya fue registrado en un checklist el día de hoy. Solo se permite un registro diario.`);
               setIsProcessing(false);
-              return; // Detiene el envío por completo
+              return; // Bloqueo absoluto de la inserción
             }
           }
+        } else {
+          console.log("⚠️ Candado omitido: La variable no contiene un ID de personal válido (es una firma o foto).");
         }
       } catch (e) {
         console.error("Error crítico en el candado:", e);
