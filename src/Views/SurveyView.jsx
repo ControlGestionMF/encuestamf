@@ -218,20 +218,17 @@ export default function SurveyView() {
     }
 
     // =================================================================
-    // CANDADO DIARIO (VALIDEZ PARA CHOFER SELECCIONADO)
+    // CANDADO DIARIO REPARADO (EXTRACCIÓN EXACTA POR TU MAPA DE ESTADO)
     // =================================================================
     try {
       setIsProcessing(true);
 
-      // Buscamos directamente el ID del chofer en tus respuestas del estado local
-      // Cambia 'respuestas' por el nombre del arreglo que manejas en tu vista (ej: respuestas, currentResponses, etc.)
-      const respuestaDelChofer = respuestas.find(r => r.idpregunta === 39);
-      
-      // Rescatamos el ID numérico
-      const idNumerico = respuestaDelChofer ? parseInt(respuestaDelChofer.descripcion || respuestaDelChofer.id_personal_respondido) : null;
+      // Leemos directamente del objeto respuestasValues usando la clave de la pregunta 39
+      const idCrudo = respuestasValues[39];
+      const idNumerico = idCrudo ? parseInt(idCrudo) : null;
 
       if (idNumerico && !isNaN(idNumerico)) {
-        console.log("Buscando duplicados para el ID del chofer:", idNumerico);
+        console.log("Candado activado. Buscando duplicados para el ID del chofer:", idNumerico);
 
         const inicioHoy = new Date();
         inicioHoy.setHours(0, 0, 0, 0);
@@ -264,18 +261,18 @@ export default function SurveyView() {
 
           if (errMatch) console.error("Error coincidencias:", errMatch);
 
-          // ¡Si hay filas, significa que ya está registrado hoy!
+          // ¡Si hay filas, el chofer ya está registrado hoy! Bloqueamos el envío.
           if (coincidencias && coincidencias.length > 0) {
             const persona = [...choferes, ...auxiliares].find(per => String(per.id_personal) === String(idNumerico));
             const nombreChofer = persona ? persona.nombre_completo : "este conductor";
 
             alert(`Atención: El chofer ${nombreChofer} ya fue registrado en un checklist el día de hoy. Solo se permite un registro diario.`);
             setIsProcessing(false);
-            return; // Bloqueo de envío
+            return; // Detiene la función por completo y no guarda nada
           }
         }
       } else {
-        console.log("No se ejecutó el candado porque no se encontró la respuesta de la pregunta 39 del chofer.");
+        console.log("Candado omitido: No se detectó un ID de chofer en la pregunta 39.");
       }
     } catch (e) {
       console.error("Error crítico en el candado:", e);
