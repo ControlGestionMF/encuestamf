@@ -220,72 +220,62 @@ export default function SurveyView() {
     // =================================================================
     // CANDADO DIARIO (VALIDEZ PARA CHOFER SELECCIONADO)
     // =================================================================
-    if (idPersonalSeleccionado) {
-      try {
-        setIsProcessing(true);
+    try {
+      setIsProcessing(true);
 
+      // 1. Buscamos la respuesta del chofer dentro del arreglo real que vas a insertar
+      // (Reemplaza 'respuestasParaEnviar' por el nombre de tu variable de respuestas)
+      const preguntaChofer = respuestasParaEnviar.find(r => r.idpregunta === 39 || r.id_personal_respondido);
+      
+      // 2. Extraemos el número de ID (ya sea de la descripción o del campo de personal)
+      const idRealChofer = preguntaChofer 
+        ? parseInt(preguntaChofer.id_personal_respondido || preguntaChofer.descripcion) 
+        : null;
+
+      // Si encontramos un ID válido, ejecutamos la seguridad
+      if (idRealChofer && !isNaN(idRealChofer)) {
+        
+        // Creamos el rango de tiempo para el día de HOY
         const inicioHoy = new Date();
         inicioHoy.setHours(0, 0, 0, 0);
-
         const finHoy = new Date();
         finHoy.setHours(23, 59, 59, 999);
 
-        // EXTRAER EL ID REAL: Si 'idPersonalSeleccionado' es un objeto, extraemos su ID numérico.
-        // Si ya era un ID directo, mantiene su valor. ¡Ajusta 'id_personal' si tu clave se llama distinto!
-        const idRealChofer = idPersonalSeleccionado.id_personal 
-          ? parseInt(idPersonalSeleccionado.id_personal) 
-          : parseInt(idPersonalSeleccionado);
-
-        // Si por alguna razón el ID sigue sin ser un número válido, no continuamos
-        if (isNaN(idRealChofer)) {
-          console.error("No se pudo obtener un ID numérico válido para el chofer:", idPersonalSeleccionado);
-          setIsProcessing(false);
-          return;
-        }
-
-        // 1. Obtener formularios de hoy
-        const { data: todosHoy, error: errTodos } = await supabase
+        // Primero revisamos qué formularios se han creado hoy en la cabecera
+        const { data: formulariosDeHoy } = await supabase
           .from('formularios_hechos')
           .select('id_formulario')
           .gte('fecha', inicioHoy.toISOString())
           .lte('fecha', finHoy.toISOString());
 
-        if (errTodos) console.error("Error trayendo formularios hechos:", errTodos);
-        
-        if (todosHoy && todosHoy.length > 0) {
-          // CLAVE: Mapeamos para obtener SOLO los números enteros del ID, quitando la estructura de objeto
-          const idsFormulariosHoy = todosHoy.map(f => f.id_formulario);
+        if (formulariosDeHoy && formulariosDeHoy.length > 0) {
+          const idsFormulariosHoy = formulariosDeHoy.map(f => f.id_formulario);
           
+          // Elegimos la tabla correcta según el tipo de checklist
           let tablaCheck = "respuestas_operario";
           if (esLimpieza) tablaCheck = "respuestas_limpieza";
           if (!esOperario && !esLimpieza) tablaCheck = "respuesta";
 
-          // 2. Buscar coincidencias en respuestas filtrando con datos limpios
-          const { data: coincidencias, error: errMatch } = await supabase
+          // Buscamos si este ID de chofer ya respondió en los formularios de hoy
+          const { data: coincidencias } = await supabase
             .from(tablaCheck)
-            .select('id_respuesta, id_formulario_vinculado, id_personal_respondido')
+            .select('id_respuesta')
             .in('id_formulario_vinculado', idsFormulariosHoy)
-            .eq('id_personal_respondido', idRealChofer); // Filtramos directo en Postgres con el ID limpio
+            .eq('id_personal_respondido', idRealChofer);
 
-          if (errMatch) console.error("Error buscando coincidencias en respuestas:", errMatch);
-
-          // Si la consulta arroja filas, el chofer ya está registrado hoy
+          // ¡Si hay coincidencia, bloqueamos!
           if (coincidencias && coincidencias.length > 0) {
-            // Buscamos el nombre para desplegar la alerta de forma limpia
-            const persona = [...choferes, ...auxiliares].find(per => 
-              String(per.id_personal) === String(idRealChofer)
-            );
+            const persona = [...choferes, ...auxiliares].find(per => String(per.id_personal) === String(idRealChofer));
             const nombreChofer = persona ? persona.nombre_completo : "este conductor";
 
             alert(`Atención: El chofer ${nombreChofer} ya fue registrado en un checklist el día de hoy. Solo se permite un registro diario.`);
             setIsProcessing(false);
-            return; // Detiene la inserción por completo
+            return; // Detiene la ejecución y no guarda nada en la base de datos
           }
         }
-
-      } catch (e) {
-        console.error("Error crítico en el candado:", e);
       }
+    } catch (error) {
+      console.error("Error en el candado de seguridad:", error);
     }
     // ==========================================
     // PASO 2: GUARDADO EN LA BASE DE DATOS
