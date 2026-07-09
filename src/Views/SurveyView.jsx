@@ -224,30 +224,27 @@ export default function SurveyView() {
       try {
         setIsProcessing(true);
 
-        // Obtenemos el año, mes y día local actual
-        const hoy = new Date();
-        const año = hoy.getFullYear();
-        const mes = String(hoy.getMonth() + 1).padStart(2, '0');
-        const dia = String(hoy.getDate()).padStart(2, '0');
+        // Creamos el rango de hoy en hora local y dejamos que JavaScript lo maneje
+        const inicioHoy = new Date();
+        inicioHoy.setHours(0, 0, 0, 0);
 
-        // Definimos el rango estricto en formato ISO compatible con UTC interpretado
-        const inicioHoyISO = `${año}-${mes}-${dia}T00:00:00.000Z`;
-        const finHoyISO = `${año}-${mes}-${dia}T23:59:59.999Z`;
+        const finHoy = new Date();
+        finHoy.setHours(23, 59, 59, 999);
 
         let tablaCheck = "respuestas_operario";
         if (esLimpieza) tablaCheck = "respuestas_limpieza";
         if (!esOperario && !esLimpieza) tablaCheck = "respuesta";
 
-        // Consultar a Supabase con inner join a la cabecera para validar la fecha
+        // CORREGIDO: Filtramos usando la columna real 'fecha' en lugar de 'created_at'
         const { data: choferDuplicado, error: errCheck } = await supabase
           .from(tablaCheck)
           .select(`
             id_respuesta,
-            formularios_hechos!inner(created_at)
+            formularios_hechos!inner(fecha)
           `)
           .eq('id_personal_respondido', parseInt(idPersonalSeleccionado))
-          .gte('formularios_hechos.created_at', inicioHoyISO)
-          .lte('formularios_hechos.created_at', finHoyISO)
+          .gte('formularios_hechos.fecha', inicioHoy.toISOString())
+          .lte('formularios_hechos.fecha', finHoy.toISOString())
           .maybeSingle();
 
         if (errCheck) console.error("Error al verificar duplicado diario:", errCheck);
@@ -258,7 +255,7 @@ export default function SurveyView() {
 
           alert(`Atención: El chofer ${nombreChofer} ya fue registrado en un checklist el día de hoy. Solo se permite un registro diario.`);
           setIsProcessing(false);
-          return; // Detiene la inserción
+          return; // Detiene la inserción por completo
         }
       } catch (e) {
         console.error("Error en validación de duplicado:", e);
