@@ -224,15 +224,21 @@ export default function SurveyView() {
       try {
         setIsProcessing(true);
 
-        const inicioHoy = new Date();
-        inicioHoy.setHours(0, 0, 0, 0);
-        const finHoy = new Date();
-        finHoy.setHours(23, 59, 59, 999);
+        // Obtenemos el año, mes y día local actual
+        const hoy = new Date();
+        const año = hoy.getFullYear();
+        const mes = String(hoy.getMonth() + 1).padStart(2, '0');
+        const dia = String(hoy.getDate()).padStart(2, '0');
+
+        // Definimos el rango estricto en formato ISO compatible con UTC interpretado
+        const inicioHoyISO = `${año}-${mes}-${dia}T00:00:00.000Z`;
+        const finHoyISO = `${año}-${mes}-${dia}T23:59:59.999Z`;
 
         let tablaCheck = "respuestas_operario";
         if (esLimpieza) tablaCheck = "respuestas_limpieza";
         if (!esOperario && !esLimpieza) tablaCheck = "respuesta";
 
+        // Consultar a Supabase con inner join a la cabecera para validar la fecha
         const { data: choferDuplicado, error: errCheck } = await supabase
           .from(tablaCheck)
           .select(`
@@ -240,8 +246,8 @@ export default function SurveyView() {
             formularios_hechos!inner(created_at)
           `)
           .eq('id_personal_respondido', parseInt(idPersonalSeleccionado))
-          .gte('formularios_hechos.created_at', inicioHoy.toISOString())
-          .lte('formularios_hechos.created_at', finHoy.toISOString())
+          .gte('formularios_hechos.created_at', inicioHoyISO)
+          .lte('formularios_hechos.created_at', finHoyISO)
           .maybeSingle();
 
         if (errCheck) console.error("Error al verificar duplicado diario:", errCheck);
@@ -252,7 +258,7 @@ export default function SurveyView() {
 
           alert(`Atención: El chofer ${nombreChofer} ya fue registrado en un checklist el día de hoy. Solo se permite un registro diario.`);
           setIsProcessing(false);
-          return; 
+          return; // Detiene la inserción
         }
       } catch (e) {
         console.error("Error en validación de duplicado:", e);
