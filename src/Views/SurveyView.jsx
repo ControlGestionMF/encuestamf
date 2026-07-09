@@ -220,80 +220,65 @@ export default function SurveyView() {
     // =================================================================
     // CANDADO DIARIO (VALIDEZ PARA CHOFER SELECCIONADO)
     // =================================================================
-    if (idPersonalSeleccionado) {
-      try {
-        setIsProcessing(true);
+    try {
+      setIsProcessing(true);
 
-        let idRealChofer = null;
+      // Buscamos directamente el ID del chofer en tus respuestas del estado local
+      // Cambia 'respuestas' por el nombre del arreglo que manejas en tu vista (ej: respuestas, currentResponses, etc.)
+      const respuestaDelChofer = respuestas.find(r => r.idpregunta === 39);
+      
+      // Rescatamos el ID numérico
+      const idNumerico = respuestaDelChofer ? parseInt(respuestaDelChofer.descripcion || respuestaDelChofer.id_personal_respondido) : null;
 
-        // 1. Validamos rigurosamente qué tipo de dato contiene la variable
-        if (typeof idPersonalSeleccionado === 'object' && idPersonalSeleccionado !== null) {
-          // Si es un objeto, verificamos que no sea un Blob o un archivo de imagen
-          if (!idPersonalSeleccionado.base64 && !idPersonalSeleccionado.size) {
-            idRealChofer = idPersonalSeleccionado.id_personal || idPersonalSeleccionado.id;
-          }
-        } else if (typeof idPersonalSeleccionado === 'string') {
-          // Si es un string, nos aseguramos de que NO sea una imagen en Base64
-          if (!idPersonalSeleccionado.startsWith('data:') && !idPersonalSeleccionado.includes('base64')) {
-            idRealChofer = idPersonalSeleccionado;
-          }
-        } else if (typeof idPersonalSeleccionado === 'number') {
-          idRealChofer = idPersonalSeleccionado;
-        }
+      if (idNumerico && !isNaN(idNumerico)) {
+        console.log("Buscando duplicados para el ID del chofer:", idNumerico);
 
-        const idNumerico = parseInt(idRealChofer);
+        const inicioHoy = new Date();
+        inicioHoy.setHours(0, 0, 0, 0);
+        
+        const finHoy = new Date();
+        finHoy.setHours(23, 59, 59, 999);
 
-        // 2. Solo si es un número de ID limpio y válido, consultamos la base de datos
-        if (idNumerico && !isNaN(idNumerico)) {
-          console.log("🛡️ Candado activado para validar ID de Chofer:", idNumerico);
+        // 1. Buscamos qué formularios se crearon hoy en la cabecera
+        const { data: formulariosDeHoy, error: errFormularios } = await supabase
+          .from('formularios_hechos')
+          .select('id_formulario')
+          .gte('fecha', inicioHoy.toISOString())
+          .lte('fecha', finHoy.toISOString());
 
-          const inicioHoy = new Date();
-          inicioHoy.setHours(0, 0, 0, 0);
+        if (errFormularios) console.error("Error cabeceras:", errFormularios);
+
+        if (formulariosDeHoy && formulariosDeHoy.length > 0) {
+          const idsFormulariosHoy = formulariosDeHoy.map(f => f.id_formulario);
           
-          const finHoy = new Date();
-          finHoy.setHours(23, 59, 59, 999);
+          let tablaCheck = "respuestas_operario";
+          if (esLimpieza) tablaCheck = "respuestas_limpieza";
+          if (!esOperario && !esLimpieza) tablaCheck = "respuesta";
 
-          // Buscar los formularios generales creados hoy
-          const { data: formulariosDeHoy, error: errFormularios } = await supabase
-            .from('formularios_hechos')
-            .select('id_formulario')
-            .gte('fecha', inicioHoy.toISOString())
-            .lte('fecha', finHoy.toISOString());
+          // 2. Buscamos si ese ID de chofer ya guardó una respuesta hoy
+          const { data: coincidencias, error: errMatch } = await supabase
+            .from(tablaCheck)
+            .select('id_respuesta')
+            .in('id_formulario_vinculado', idsFormulariosHoy)
+            .eq('id_personal_respondido', idNumerico);
 
-          if (errFormularios) console.error("Error en cabeceras:", errFormularios);
+          if (errMatch) console.error("Error coincidencias:", errMatch);
 
-          if (formulariosDeHoy && formulariosDeHoy.length > 0) {
-            const idsFormulariosHoy = formulariosDeHoy.map(f => f.id_formulario);
-            
-            let tablaCheck = "respuestas_operario";
-            if (esLimpieza) tablaCheck = "respuestas_limpieza";
-            if (!esOperario && !esLimpieza) tablaCheck = "respuesta";
+          // ¡Si hay filas, significa que ya está registrado hoy!
+          if (coincidencias && coincidencias.length > 0) {
+            const persona = [...choferes, ...auxiliares].find(per => String(per.id_personal) === String(idNumerico));
+            const nombreChofer = persona ? persona.nombre_completo : "este conductor";
 
-            // Buscar si el ID del chofer ya contestó en los formularios de hoy
-            const { data: coincidencias, error: errMatch } = await supabase
-              .from(tablaCheck)
-              .select('id_respuesta')
-              .in('id_formulario_vinculado', idsFormulariosHoy)
-              .eq('id_personal_respondido', idNumerico);
-
-            if (errMatch) console.error("Error en coincidencias:", errMatch);
-
-            // ¡Coincidencia encontrada! Se frena el flujo y salta la alerta
-            if (coincidencias && coincidencias.length > 0) {
-              const persona = [...choferes, ...auxiliares].find(per => String(per.id_personal) === String(idNumerico));
-              const nombreChofer = persona ? persona.nombre_completo : "este conductor";
-
-              alert(`Atención: El chofer ${nombreChofer} ya fue registrado en un checklist el día de hoy. Solo se permite un registro diario.`);
-              setIsProcessing(false);
-              return; // Bloqueo absoluto de la inserción
-            }
+            alert(`Atención: El chofer ${nombreChofer} ya fue registrado en un checklist el día de hoy. Solo se permite un registro diario.`);
+            setIsProcessing(false);
+            return; // Bloqueo de envío
           }
-        } else {
-          console.log("⚠️ Candado omitido: La variable no contiene un ID de personal válido (es una firma o foto).");
         }
-      } catch (e) {
-        console.error("Error crítico en el candado:", e);
+      } else {
+        console.log("No se ejecutó el candado porque no se encontró la respuesta de la pregunta 39 del chofer.");
       }
+    } catch (e) {
+      console.error("Error crítico en el candado:", e);
     }
     // ==========================================
     // PASO 2: GUARDADO EN LA BASE DE DATOS
